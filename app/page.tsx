@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { FileText, Sparkles, Send } from "lucide-react"
+import { FileText, Sparkles, Send, Mail, FilePlus, ExternalLink } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,12 +21,76 @@ import {
   FieldGroup,
 } from "@/components/ui/field"
 
+// Cloud function endpoints. CREATE_DOC_URL needs to be updated once the
+// new function is deployed — Firebase usually preserves the project
+// hash so the URL is likely
+//   https://createritualdoc-b6fhjlgejq-uc.a.run.app
+// (mirroring registernewritual-b6fhjlgejq-uc.a.run.app). Confirm in the
+// Firebase console after the first deploy and adjust if needed.
+const CREATE_DOC_URL =
+  "https://createritualdoc-b6fhjlgejq-uc.a.run.app"
+const REGISTER_RITUAL_URL =
+  "https://registernewritual-b6fhjlgejq-uc.a.run.app"
+
 export default function RegisterRitualPage() {
+  // ----- "Create Ritual Doc" state -----
+  const [email, setEmail] = useState("")
+  const [emailError, setEmailError] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null)
+
+  // ----- "Register New Ritual" state (unchanged) -----
   const [googleDocLink, setGoogleDocLink] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [userInputs, setUserInputs] = useState<string | null>(null)
 
+  const validateEmail = (value: string): boolean => {
+    if (!value.trim()) {
+      setEmailError("Email is required")
+      return false
+    }
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!re.test(value.trim())) {
+      setEmailError("Enter a valid email")
+      return false
+    }
+    setEmailError(null)
+    return true
+  }
+
+  const handleCreateDoc = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!validateEmail(email)) return
+    setIsCreating(true)
+    setCreatedUrl(null)
+    try {
+      const res = await fetch(CREATE_DOC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      })
+      const data = await res.json()
+      if (res.ok && data.documentUrl) {
+        setCreatedUrl(data.documentUrl)
+        toast.success("Ritual doc created", {
+          description: `Shared with ${email.trim()} (writer access).`,
+        })
+      } else {
+        toast.error("Could not create doc", {
+          description: data.error || "Unknown error.",
+        })
+      }
+    } catch (err) {
+      toast.error("Connection error", {
+        description: err instanceof Error ? err.message : "Network failed.",
+      })
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  // ----- existing "Register New Ritual" handler (unchanged) -----
   const validateLink = (link: string): boolean => {
     if (!link.trim()) {
       setLinkError("Google Docs Link is required")
@@ -38,36 +102,21 @@ export default function RegisterRitualPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!validateLink(googleDocLink)) {
-      return
-    }
-
+    if (!validateLink(googleDocLink)) return
     setIsLoading(true)
-
     try {
-      const response = await fetch(
-        "https://registernewritual-b6fhjlgejq-uc.a.run.app",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            googleDocLink: googleDocLink.trim(),
-          }),
-        }
-      )
-
+      const response = await fetch(REGISTER_RITUAL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ googleDocLink: googleDocLink.trim() }),
+      })
       const data = await response.json()
-
       if (response.ok) {
         toast.success("Ritual Registered!", {
-          description: data.message || "Your ritual has been successfully registered.",
+          description:
+            data.message || "Your ritual has been successfully registered.",
         })
-        if (data.userInputs) {
-          setUserInputs(data.userInputs)
-        }
+        if (data.userInputs) setUserInputs(data.userInputs)
         setGoogleDocLink("")
       } else {
         toast.error("Registration Failed", {
@@ -87,7 +136,82 @@ export default function RegisterRitualPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background flex items-center justify-center p-4">
+    <main className="min-h-screen bg-background flex flex-col items-center justify-start gap-6 p-4 py-12">
+      {/* ----- Create Ritual Doc Card ----- */}
+      <Card className="w-full max-w-lg">
+        <CardHeader className="text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <FilePlus className="h-6 w-6 text-primary" />
+          </div>
+          <CardTitle className="text-2xl">Create Ritual Doc</CardTitle>
+          <CardDescription>
+            Generate a fresh ritual Google Doc from the template and share it with the user.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleCreateDoc}>
+            <FieldGroup>
+              <Field data-invalid={!!emailError}>
+                <FieldLabel htmlFor="user-email">
+                  <Mail className="h-4 w-4" />
+                  User Email
+                  <span className="text-destructive">*</span>
+                </FieldLabel>
+                <Input
+                  id="user-email"
+                  type="email"
+                  placeholder="user@example.com"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    if (emailError) validateEmail(e.target.value)
+                  }}
+                  disabled={isCreating}
+                  aria-invalid={!!emailError}
+                  aria-describedby={emailError ? "email-error" : undefined}
+                />
+                {emailError && (
+                  <FieldError id="email-error">{emailError}</FieldError>
+                )}
+              </Field>
+
+              <Button type="submit" className="w-full mt-2" disabled={isCreating}>
+                {isCreating ? (
+                  <>
+                    <Spinner className="mr-2" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <FilePlus className="mr-2 h-4 w-4" />
+                    Create Doc
+                  </>
+                )}
+              </Button>
+            </FieldGroup>
+          </form>
+
+          {createdUrl && (
+            <div className="mt-6 border-t pt-6 flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                Doc created and shared. Click below to open it in a new tab,
+                fill it in, then copy the URL back into the Register form.
+              </p>
+              <Button asChild variant="secondary" className="w-full">
+                <a href={createdUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open Doc
+                </a>
+              </Button>
+              <code className="text-xs break-all text-muted-foreground">
+                {createdUrl}
+              </code>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ----- Register New Ritual Card (UNCHANGED behavior) ----- */}
       <Card className="w-full max-w-lg">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
@@ -120,14 +244,11 @@ export default function RegisterRitualPage() {
                   aria-invalid={!!linkError}
                   aria-describedby={linkError ? "link-error" : undefined}
                 />
-                {linkError && <FieldError id="link-error">{linkError}</FieldError>}
+                {linkError && (
+                  <FieldError id="link-error">{linkError}</FieldError>
+                )}
               </Field>
-
-              <Button
-                type="submit"
-                className="w-full mt-2"
-                disabled={isLoading}
-              >
+              <Button type="submit" className="w-full mt-2" disabled={isLoading}>
                 {isLoading ? (
                   <>
                     <Spinner className="mr-2" />
