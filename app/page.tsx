@@ -142,7 +142,7 @@ export default function RegisterRitualPage() {
 // =====================================================================
 
 interface MetadataForm {
-  userID: string
+  name: string
   voiceID: string
   language: string
   phoneNumber: string
@@ -152,7 +152,7 @@ interface MetadataForm {
 type MetadataField = keyof MetadataForm
 
 const INITIAL_METADATA: MetadataForm = {
-  userID: "",
+  name: "",
   voiceID: "",
   language: "en",
   phoneNumber: "",
@@ -166,6 +166,7 @@ function CreateRitualDocCard() {
   >({})
   const [isCreating, setIsCreating] = useState(false)
   const [createdUrl, setCreatedUrl] = useState<string | null>(null)
+  const [createdUserId, setCreatedUserId] = useState<string | null>(null)
 
   const validateField = (
     field: MetadataField,
@@ -210,12 +211,13 @@ function CreateRitualDocCard() {
     if (!validateAll()) return
     setIsCreating(true)
     setCreatedUrl(null)
+    setCreatedUserId(null)
     try {
       const res = await fetch(CREATE_DOC_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userID: metadata.userID.trim(),
+          name: metadata.name.trim(),
           voiceID: metadata.voiceID.trim(),
           language: metadata.language.trim(),
           phoneNumber: metadata.phoneNumber.trim(),
@@ -225,6 +227,7 @@ function CreateRitualDocCard() {
       const data = await res.json()
       if (res.ok && data.documentUrl) {
         setCreatedUrl(data.documentUrl)
+        if (data.userID) setCreatedUserId(data.userID)
         toast.success("Ritual doc created", {
           description:
             "Metadata pre-filled. Open the doc to fill in Problem-Solution and Ritual Call.",
@@ -257,22 +260,22 @@ function CreateRitualDocCard() {
       <CardContent>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
-            <Field data-invalid={!!errors.userID}>
-              <FieldLabel htmlFor="meta-userID">
+            <Field data-invalid={!!errors.name}>
+              <FieldLabel htmlFor="meta-name">
                 <User className="h-4 w-4" />
-                User ID
+                Name
                 <span className="text-destructive">*</span>
               </FieldLabel>
               <Input
-                id="meta-userID"
+                id="meta-name"
                 type="text"
-                placeholder="Firebase Auth UID"
-                value={metadata.userID}
-                onChange={(e) => setField("userID", e.target.value)}
+                placeholder="e.g. Thomas"
+                value={metadata.name}
+                onChange={(e) => setField("name", e.target.value)}
                 disabled={isCreating}
-                aria-invalid={!!errors.userID}
+                aria-invalid={!!errors.name}
               />
-              {errors.userID && <FieldError>{errors.userID}</FieldError>}
+              {errors.name && <FieldError>{errors.name}</FieldError>}
             </Field>
 
             <Field data-invalid={!!errors.voiceID}>
@@ -374,6 +377,14 @@ function CreateRitualDocCard() {
             <p className="text-sm text-muted-foreground">
               Doc created with metadata pre-filled. Open it to write the Problem-Solution and Ritual Call sections, then copy the URL into the Register view.
             </p>
+            {createdUserId && (
+              <div className="rounded-md bg-muted px-3 py-2">
+                <p className="text-xs text-muted-foreground">Generated User ID</p>
+                <code className="text-xs break-all font-mono">
+                  {createdUserId}
+                </code>
+              </div>
+            )}
             <Button asChild variant="secondary" className="w-full">
               <a href={createdUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="mr-2 h-4 w-4" />
