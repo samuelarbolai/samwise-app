@@ -2,7 +2,18 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
-import { FileText, Sparkles, Send, Mail, FilePlus, ExternalLink } from "lucide-react"
+import {
+  FileText,
+  Sparkles,
+  Send,
+  FilePlus,
+  ExternalLink,
+  User,
+  Mic,
+  Languages,
+  Phone,
+  Clock,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -20,22 +31,47 @@ import {
   FieldError,
   FieldGroup,
 } from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
-// Cloud function endpoints. CREATE_DOC_URL needs to be updated once the
-// new function is deployed — Firebase usually preserves the project
-// hash so the URL is likely
-//   https://createritualdoc-b6fhjlgejq-uc.a.run.app
-// (mirroring registernewritual-b6fhjlgejq-uc.a.run.app). Confirm in the
-// Firebase console after the first deploy and adjust if needed.
+// Cloud function endpoints. Update CREATE_DOC_URL after the first
+// deploy if Firebase landed the function on a different hash than
+// `createritualdoc-b6fhjlgejq-uc.a.run.app` (it usually preserves
+// the project hash, mirroring registernewritual).
 const CREATE_DOC_URL =
   "https://createritualdoc-b6fhjlgejq-uc.a.run.app"
 const REGISTER_RITUAL_URL =
   "https://registernewritual-b6fhjlgejq-uc.a.run.app"
 
+interface MetadataForm {
+  userID: string
+  voiceID: string
+  language: string
+  phoneNumber: string
+  timeZone: string
+}
+
+type MetadataField = keyof MetadataForm
+
+const INITIAL_METADATA: MetadataForm = {
+  userID: "",
+  voiceID: "",
+  language: "en",
+  phoneNumber: "",
+  timeZone: "",
+}
+
 export default function RegisterRitualPage() {
   // ----- "Create Ritual Doc" state -----
-  const [email, setEmail] = useState("")
-  const [emailError, setEmailError] = useState<string | null>(null)
+  const [metadata, setMetadata] = useState<MetadataForm>(INITIAL_METADATA)
+  const [metadataErrors, setMetadataErrors] = useState<
+    Partial<Record<MetadataField, string>>
+  >({})
   const [isCreating, setIsCreating] = useState(false)
   const [createdUrl, setCreatedUrl] = useState<string | null>(null)
 
@@ -45,36 +81,69 @@ export default function RegisterRitualPage() {
   const [linkError, setLinkError] = useState<string | null>(null)
   const [userInputs, setUserInputs] = useState<string | null>(null)
 
-  const validateEmail = (value: string): boolean => {
-    if (!value.trim()) {
-      setEmailError("Email is required")
-      return false
+  const setField = (field: MetadataField, value: string) => {
+    setMetadata((prev) => ({ ...prev, [field]: value }))
+    if (metadataErrors[field]) {
+      // Re-validate just this field so the error clears on a good fix
+      // without forcing the whole form to revalidate on every keystroke.
+      setMetadataErrors((prev) => {
+        const next = { ...prev }
+        const error = validateField(field, value)
+        if (error) next[field] = error
+        else delete next[field]
+        return next
+      })
     }
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!re.test(value.trim())) {
-      setEmailError("Enter a valid email")
-      return false
+  }
+
+  const validateField = (
+    field: MetadataField,
+    value: string,
+  ): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return "Required"
+    if (field === "phoneNumber" && !/^\+[1-9]\d{6,14}$/.test(trimmed)) {
+      return "Use E.164, e.g. +573168248411"
     }
-    setEmailError(null)
-    return true
+    if (field === "timeZone" && !/^[A-Za-z_]+\/[A-Za-z_]+/.test(trimmed)) {
+      return "Use IANA, e.g. America/Bogota"
+    }
+    return null
+  }
+
+  const validateAllMetadata = (): boolean => {
+    const next: Partial<Record<MetadataField, string>> = {}
+    ;(Object.keys(metadata) as MetadataField[]).forEach((field) => {
+      const error = validateField(field, metadata[field])
+      if (error) next[field] = error
+    })
+    setMetadataErrors(next)
+    return Object.keys(next).length === 0
   }
 
   const handleCreateDoc = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!validateEmail(email)) return
+    if (!validateAllMetadata()) return
     setIsCreating(true)
     setCreatedUrl(null)
     try {
       const res = await fetch(CREATE_DOC_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({
+          userID: metadata.userID.trim(),
+          voiceID: metadata.voiceID.trim(),
+          language: metadata.language.trim(),
+          phoneNumber: metadata.phoneNumber.trim(),
+          timeZone: metadata.timeZone.trim(),
+        }),
       })
       const data = await res.json()
       if (res.ok && data.documentUrl) {
         setCreatedUrl(data.documentUrl)
         toast.success("Ritual doc created", {
-          description: `Shared with ${email.trim()} (writer access).`,
+          description:
+            "Metadata pre-filled. Open the doc to fill in Problem-Solution and Ritual Call.",
         })
       } else {
         toast.error("Could not create doc", {
@@ -145,33 +214,113 @@ export default function RegisterRitualPage() {
           </div>
           <CardTitle className="text-2xl">Create Ritual Doc</CardTitle>
           <CardDescription>
-            Generate a fresh ritual Google Doc from the template and share it with the user.
+            Enter the user's metadata. We'll copy the canonical template into your Samwise Rituals folder with these values pre-filled.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreateDoc}>
             <FieldGroup>
-              <Field data-invalid={!!emailError}>
-                <FieldLabel htmlFor="user-email">
-                  <Mail className="h-4 w-4" />
-                  User Email
+              <Field data-invalid={!!metadataErrors.userID}>
+                <FieldLabel htmlFor="meta-userID">
+                  <User className="h-4 w-4" />
+                  User ID
                   <span className="text-destructive">*</span>
                 </FieldLabel>
                 <Input
-                  id="user-email"
-                  type="email"
-                  placeholder="user@example.com"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    if (emailError) validateEmail(e.target.value)
-                  }}
+                  id="meta-userID"
+                  type="text"
+                  placeholder="Firebase Auth UID"
+                  value={metadata.userID}
+                  onChange={(e) => setField("userID", e.target.value)}
                   disabled={isCreating}
-                  aria-invalid={!!emailError}
-                  aria-describedby={emailError ? "email-error" : undefined}
+                  aria-invalid={!!metadataErrors.userID}
                 />
-                {emailError && (
-                  <FieldError id="email-error">{emailError}</FieldError>
+                {metadataErrors.userID && (
+                  <FieldError>{metadataErrors.userID}</FieldError>
+                )}
+              </Field>
+
+              <Field data-invalid={!!metadataErrors.voiceID}>
+                <FieldLabel htmlFor="meta-voiceID">
+                  <Mic className="h-4 w-4" />
+                  Voice ID
+                  <span className="text-destructive">*</span>
+                </FieldLabel>
+                <Input
+                  id="meta-voiceID"
+                  type="text"
+                  placeholder="Cartesia voice UUID"
+                  value={metadata.voiceID}
+                  onChange={(e) => setField("voiceID", e.target.value)}
+                  disabled={isCreating}
+                  aria-invalid={!!metadataErrors.voiceID}
+                />
+                {metadataErrors.voiceID && (
+                  <FieldError>{metadataErrors.voiceID}</FieldError>
+                )}
+              </Field>
+
+              <Field data-invalid={!!metadataErrors.language}>
+                <FieldLabel htmlFor="meta-language">
+                  <Languages className="h-4 w-4" />
+                  Language
+                  <span className="text-destructive">*</span>
+                </FieldLabel>
+                <Select
+                  value={metadata.language}
+                  onValueChange={(v) => setField("language", v)}
+                  disabled={isCreating}
+                >
+                  <SelectTrigger id="meta-language" className="w-full">
+                    <SelectValue placeholder="Select a language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English (en)</SelectItem>
+                    <SelectItem value="es">Spanish (es)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {metadataErrors.language && (
+                  <FieldError>{metadataErrors.language}</FieldError>
+                )}
+              </Field>
+
+              <Field data-invalid={!!metadataErrors.phoneNumber}>
+                <FieldLabel htmlFor="meta-phoneNumber">
+                  <Phone className="h-4 w-4" />
+                  Phone Number
+                  <span className="text-destructive">*</span>
+                </FieldLabel>
+                <Input
+                  id="meta-phoneNumber"
+                  type="tel"
+                  placeholder="+573168248411"
+                  value={metadata.phoneNumber}
+                  onChange={(e) => setField("phoneNumber", e.target.value)}
+                  disabled={isCreating}
+                  aria-invalid={!!metadataErrors.phoneNumber}
+                />
+                {metadataErrors.phoneNumber && (
+                  <FieldError>{metadataErrors.phoneNumber}</FieldError>
+                )}
+              </Field>
+
+              <Field data-invalid={!!metadataErrors.timeZone}>
+                <FieldLabel htmlFor="meta-timeZone">
+                  <Clock className="h-4 w-4" />
+                  Time Zone
+                  <span className="text-destructive">*</span>
+                </FieldLabel>
+                <Input
+                  id="meta-timeZone"
+                  type="text"
+                  placeholder="America/Bogota"
+                  value={metadata.timeZone}
+                  onChange={(e) => setField("timeZone", e.target.value)}
+                  disabled={isCreating}
+                  aria-invalid={!!metadataErrors.timeZone}
+                />
+                {metadataErrors.timeZone && (
+                  <FieldError>{metadataErrors.timeZone}</FieldError>
                 )}
               </Field>
 
@@ -194,8 +343,7 @@ export default function RegisterRitualPage() {
           {createdUrl && (
             <div className="mt-6 border-t pt-6 flex flex-col gap-3">
               <p className="text-sm text-muted-foreground">
-                Doc created and shared. Click below to open it in a new tab,
-                fill it in, then copy the URL back into the Register form.
+                Doc created with metadata pre-filled. Open it to write the Problem-Solution and Ritual Call sections, then copy the URL into the Register form below.
               </p>
               <Button asChild variant="secondary" className="w-full">
                 <a href={createdUrl} target="_blank" rel="noopener noreferrer">
