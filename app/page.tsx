@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { toast } from "sonner"
+import Link from "next/link"
 import {
   FileText,
   Sparkles,
@@ -13,6 +14,7 @@ import {
   Languages,
   Phone,
   Clock,
+  PhoneCall,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -107,6 +109,22 @@ export default function RegisterRitualPage() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          <SidebarGroup>
+            <SidebarGroupLabel>User experience</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Ritual call">
+                    <Link href="/ritual-call">
+                      <PhoneCall className="h-4 w-4" />
+                      <span>Ritual call</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
