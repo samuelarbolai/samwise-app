@@ -125,6 +125,14 @@ export default function RegisterRitualPage() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Demo Call copilot">
+                    <Link href="/copilot">
+                      <Sparkles className="h-4 w-4" />
+                      <span>Demo Call copilot</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
