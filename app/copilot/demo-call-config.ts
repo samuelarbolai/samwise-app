@@ -70,6 +70,57 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   { name: "age_range",        label: "Age range",         phase: "pre-call", meaning: "Age bracket.",                    inputKind: "select", options: ["<20","20-29","30-39","40-49","50-59","60+"], cleanable: false },
   { name: "country",          label: "Country",           phase: "pre-call", meaning: "Country.",                        inputKind: "text",   cleanable: false },
   { name: "referral_source",  label: "Referral source",   phase: "pre-call", meaning: "How they got here (referral name / ad / organic).", inputKind: "text", cleanable: false },
+
+  // ---- From qualification (prefilled by Pre-fill from qualification) ----
+  // These fields are captured during /qualify and arrive here via the
+  // loadQualification → prefill flow. They're not captured live during
+  // the Demo Call — the rep references them while reading the script,
+  // and the script substitutes their cleaned forms via {{var}} slots.
+  {
+    name: "life_stage_context",
+    label: "Life stage context",
+    phase: "pre-call",
+    meaning: "Where they are right now: work, family, what's loud.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "The prospect's current life context — what's happening for them right now (work, family, transitions, what's loud or stressful). NOT the behaviour, NOT motivation. Use it primarily to disambiguate other variables. Examples: 'construyendo nuestra empresa, casado con dos hijas pequeñas', 'finishing my thesis while taking care of my mother'.",
+  },
+  {
+    name: "problem_duration_self_reported",
+    label: "Problem duration",
+    phase: "pre-call",
+    meaning: "How long they've been struggling with this.",
+    inputKind: "text",
+    cleanable: true,
+    frameworkSemantics: "How long the prospect has been struggling with the behaviour, in their own words. Examples: 'dos años', 'desde la universidad', 'mucho tiempo, quizás desde la secundaria'. Keep verbatim phrasing where possible; translate to the script language if needed but preserve their level of specificity.",
+  },
+  {
+    name: "symbolic_anchor_type",
+    label: "Symbolic anchor type",
+    phase: "pre-call",
+    meaning: "Tradition / philosophy / esoteric / hyper-rational / none.",
+    inputKind: "select",
+    options: ["religious", "philosophical", "esoteric", "hyper-rational", "none"],
+    cleanable: false,
+  },
+  {
+    name: "symbolic_anchor_description",
+    label: "Symbolic anchor description",
+    phase: "pre-call",
+    meaning: "What they draw strength from, in their own words.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "The prospect's own description of the tradition, philosophy, or set of principles they draw strength from. Used in Phase 1.5 reflect AND in Phase 7a mantra-building, so the cleaned form must read naturally as the OBJECT of phrases like 'te apoyás en ___' and 'sacás fuerza de ___'. Preserve the prospect's specific references (book titles, deities, practices) and their language. Examples: 'la oración católica de mi infancia', 'la filosofía estoica, sobre todo Marco Aurelio', 'rituales judíos y el simbolismo del Señor de los Anillos'. Do NOT abstract away their specifics into a generic noun like 'spirituality' or 'religión'.",
+  },
+  {
+    name: "alternatives_exhaustion_level",
+    label: "Alternatives exhaustion level",
+    phase: "pre-call",
+    meaning: "How much they've tried already (your judgment).",
+    inputKind: "select",
+    options: ["low", "medium", "high"],
+    cleanable: false,
+  },
   {
     name: "intake_behaviour",
     label: "Intake behaviour",

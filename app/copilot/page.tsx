@@ -86,13 +86,20 @@ export default function CopilotPage() {
   const [isLoadingQualification, setIsLoadingQualification] = useState(false)
 
   // Fields the qualification doc shares with DEMO_CALL_VARIABLES. The
-  // mapping is name-for-name except where the wording differs.
+  // mapping is name-for-name. Adding a new shared variable requires
+  // (a) adding a DemoCallVariable entry in demo-call-config.ts and
+  // (b) listing the field name here.
   const QUALIFICATION_TO_DEMO_FIELDS: Array<keyof QualificationDoc> = [
     "prospect_name",
     "behaviour_to_change",
     "core_motivation",
     "alternatives_tried",
     "why_alternatives_failed",
+    "life_stage_context",
+    "problem_duration_self_reported",
+    "symbolic_anchor_type",
+    "symbolic_anchor_description",
+    "alternatives_exhaustion_level",
   ]
 
   const handleLoadQualification = async () => {

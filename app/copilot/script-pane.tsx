@@ -28,11 +28,19 @@ function renderText(
         </span>,
       )
     } else {
+      // Cell unfilled (either rep hasn't typed yet, or the qualification
+      // didn't have a value for it). Show "Not filled by user" so the
+      // rep skimming the script sees the gap explicitly — and so the
+      // sentence still reads as grammatical English/Spanish prose
+      // instead of a bare {{var_name}}.
       parts.push(
         <span
           key={key++}
           className="italic text-muted-foreground/60"
-        >{`{{${name}}}`}</span>,
+          title={`{{${name}}}`}
+        >
+          Not filled by user
+        </span>,
       )
     }
     lastIdx = re.lastIndex
