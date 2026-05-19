@@ -20,32 +20,56 @@ samwise-app has no Firestore or Drive access of its own — it's a thin client t
 ## Module Overview
 A minimal Next.js 16 (App Router) project scaffolded with shadcn/ui. Everything lives under `app/` (App Router pages) and `components/ui/` (shadcn primitives). No backend code lives here — every action POSTs cross-origin to a deployed Firebase cloud function URL.
 
-The current single page is `app/page.tsx`: a "Register New Ritual" form that takes a Google Doc URL and POSTs it to `registerNewRitual`. New features extend this page (or add sibling routes under `app/`) and add a new cloud function call.
+Existing routes:
+- `/` — operator tools sidebar shell + "Register New Ritual" / "Create Ritual Doc" forms (`app/page.tsx`).
+- `/ritual-call` — LiveKit-based ritual call experience (see `samwise-app-livekit-integration` skill).
+- `/copilot` — rep-side in-call surface for the Demo Call. Two-pane: variables capture (left), script with live `{{variable}}` substitution (right). Variables are denoised by a Gemini-backed cleaner that produces script-context-aware substitutions (not canonical-generic forms). End-of-call writes one row to the funnel sheet. See the `samwise-session-copilot` skill for the architecture, the `[SAY]/[/SAY]` marker convention in script Docs, the `frameworkSemantics` per-variable pattern, and the deferred items.
+
+New features extend the relevant route (or add sibling routes under `app/`) and add a new cloud function call. Pattern for cross-origin calls: a wrapper module under `lib/<feature>/` with the function URL as a top-level `const`, mirroring the constants in `app/page.tsx`.
 
 ## Module Structure (Directories and files)
 ```
 samwise-app/
 ├── app/
 │   ├── layout.tsx
-│   ├── page.tsx               # current "Register New Ritual" page
-│   └── globals.css
+│   ├── page.tsx                  # Register Ritual / Create Doc operator tools
+│   ├── globals.css
+│   ├── ritual-call/              # LiveKit ritual call experience
+│   │   └── page.tsx
+│   ├── copilot/                  # Session Copilot (Demo Call v1)
+│   │   ├── page.tsx              # URL gate + two-pane shell, localStorage restore
+│   │   ├── variables-table.tsx   # capture pane, per-row raw + cleaned
+│   │   ├── script-pane.tsx       # blocks renderer, click + IntersectionObserver scroll-sync
+│   │   └── demo-call-config.ts   # variable metadata + frameworkSemantics + default Doc URL
+│   └── api/                      # API routes (LiveKit token minting, etc.)
 ├── components/
 │   ├── theme-provider.tsx
-│   └── ui/                    # shadcn/ui primitives (Button, Input, Card, Field, Spinner, …)
+│   └── ui/                    # shadcn/ui primitives (Button, Input, Card, Field, Spinner, Textarea, …)
 ├── hooks/
 │   ├── use-mobile.ts
 │   └── use-toast.ts
 ├── lib/
-│   └── utils.ts               # cn() helper
+│   ├── utils.ts               # cn() helper
+│   └── copilot/               # Session Copilot client wrappers
+│       ├── load-script.ts     # loadCallScript wrapper + legacy-shape normalizer
+│       ├── clean-variable.ts  # cleanVariable wrapper + debounce + script-context extractor
+│       ├── append-row.ts      # appendDemoCallRow wrapper
+│       └── session-storage.ts # localStorage autosave + restore (v2 key)
 ├── public/
 ├── styles/
 ├── components.json            # shadcn config
 ├── next.config.mjs
-├── package.json               # next, react, sonner, lucide-react, shadcn deps
+├── package.json               # next, react, sonner, lucide-react, shadcn, livekit-client deps
 ├── tsconfig.json
 ├── context-for-code-agent.md  # this file
 └── current-plan.md            # active task plan
 ```
+
+## Out of scope / future modules
+
+- **AI rep agent.** A future LiveKit voice agent that will run a Demo-style call as a substitute for the human rep. Will consume rows captured via `/copilot`. Lives in `samwise-backend/` when built — not in this repo. Currently undefined.
+- **Fit Assessment Call.** Upstream session that captures `behaviour_to_change`, `core_motivation`, `alternatives_tried`, `why_alternatives_failed`, `symbolic_anchor_description` and feeds them forward into the Demo Call via VLOOKUP per the framework. Doesn't exist yet — the copilot currently has the rep type these live during the Demo as a workaround.
+- **Onboarding / Call Design copilot.** The `loadCallScript` cloud function already returns `scriptType: "onboarding" | "call_design"` for forward-compat, but `/copilot` only handles `scriptType: "demo"` in v1. Adding these is frontend-only work (a new `*-call-config.ts`, branch on `scriptType` in `page.tsx`) + a sibling `append<Type>Row` cloud function. See the `samwise-session-copilot` skill.
 
 ## Conventions specific to this module
 - **Cross-origin cloud-function calls.** Endpoints are absolute URLs to deployed Firebase functions (`https://<region>-<project>.cloudfunctions.net/<fn>` or the run URL like `https://registernewritual-b6fhjlgejq-uc.a.run.app`). The cloud function must enable CORS. Don't proxy through a Next.js API route unless a feature genuinely needs server-side secrets — samwise-app has none.
