@@ -11,6 +11,10 @@ interface CleanRequest {
   rawValue: string
   frameworkSemantics?: string
   scriptContexts: string[]
+  // Other captured variables for cross-context disambiguation. The
+  // cleaner uses these to resolve ambiguity in the rep's raw note but
+  // does NOT pull content into the output for this variable.
+  otherVariables?: Record<string, string>
 }
 
 interface CleanResponse {
@@ -83,9 +87,19 @@ export function cleanVariableDebounced(
   variable: DemoCallVariable,
   rawValue: string,
   script: LoadedScript,
+  otherVariables: Record<string, string>,
   onResult: (cleaned: string) => void,
 ) {
-  const key = `${variable.name}::${rawValue}`
+  // Include otherVariables (filtered to non-empty) in the cache key so a
+  // change in context invalidates a stale cleaning. Without this, a
+  // cell that was cleaned early in the call would keep its first
+  // cleaning even after surrounding context filled in.
+  const ctxKey = Object.entries(otherVariables ?? {})
+    .filter(([k, v]) => k !== variable.name && typeof v === "string" && v.trim())
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join("|")
+  const key = `${variable.name}::${rawValue}::${ctxKey}`
 
   const cached = resultCache.get(key)
   if (cached !== undefined) {
@@ -119,6 +133,7 @@ export function cleanVariableDebounced(
           rawValue,
           frameworkSemantics: variable.frameworkSemantics,
           scriptContexts,
+          otherVariables,
         } satisfies CleanRequest),
         signal: controller.signal,
       })

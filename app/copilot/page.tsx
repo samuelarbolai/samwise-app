@@ -109,6 +109,18 @@ export default function CopilotPage() {
       }
       const q = resp.qualification
 
+      // Build the cross-context bundle once from the WHOLE qualification
+      // doc. This is the richest disambiguation source we have for
+      // prefill — every cleaning call during the prefill sees the full
+      // prospect picture (life_stage_context, motivation, symbolic
+      // anchor, etc.) so it can resolve ambiguous wordings correctly
+      // (e.g. "defaulting" with romantic core_motivation → "settling
+      // for mediocre women", NOT "incumplimiento").
+      const qOtherVars: Record<string, string> = {}
+      for (const [k, v] of Object.entries(q)) {
+        if (typeof v === "string" && v.trim()) qOtherVars[k] = v
+      }
+
       // Find each match against DEMO_CALL_VARIABLES and update state.
       // For cleanable fields we trigger cleanVariableDebounced exactly
       // as VariablesTable's setRaw does; for non-cleanable fields we
@@ -135,7 +147,7 @@ export default function CopilotPage() {
               ? { ...prev, cleaning: { ...prev.cleaning, [key]: true } }
               : prev,
           )
-          cleanVariableDebounced(variable, value, script, (cleaned) => {
+          cleanVariableDebounced(variable, value, script, qOtherVars, (cleaned) => {
             setState((prev) =>
               prev
                 ? {

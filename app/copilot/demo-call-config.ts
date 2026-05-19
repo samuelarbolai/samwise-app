@@ -106,7 +106,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     meaning: "The specific behaviour (short label).",
     inputKind: "text",
     cleanable: true,
-    frameworkSemantics: "Short label (1-3 words) for the SPECIFIC behaviour the prospect wants to change. NOT the motivation, NOT consequences, NOT context — just the behaviour name. Examples: 'doomscrolling', 'road rage', 'procrastinación'.",
+    frameworkSemantics: "A label (1-3 words ideally, up to 7 if a single noun can't capture the prospect's meaning) for the SPECIFIC behaviour the prospect wants to change. NOT the motivation, NOT consequences, NOT context. Examples of GOOD outputs: 'doomscrolling', 'road rage', 'procrastinación', 'salir con mujeres mediocres', 'comer compulsivamente de noche'. CRITICAL: preserve the prospect's specific framing. Do NOT collapse a vivid description into an abstract generic noun. If the prospect said 'defaulting for hanging out with mediocre women', the right output is 'salir con mujeres mediocres' or 'conformarme con cualquier mujer' — NEVER 'incumplimiento' or 'conformismo' (those abstract away from what they actually said). Use OTHER VARIABLES (core_motivation, life_stage_context) to disambiguate when a word has multiple senses.",
   },
 
   // ---- Phase 3 ----

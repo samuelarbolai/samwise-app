@@ -75,7 +75,19 @@ export function VariablesTable({
       (prev) =>
         prev && { ...prev, cleaning: { ...prev.cleaning, [name]: true } },
     )
-    cleanVariableDebounced(v, raw, script, (cleaned) => {
+    // Build cross-variable context for disambiguation: every OTHER
+    // variable's cleaned form (or its raw if cleaning hasn't run yet),
+    // so the cleaner can resolve word-sense ambiguity using what's
+    // already known about this prospect.
+    const otherVars: Record<string, string> = {}
+    for (const x of variables) {
+      if (x.name === name) continue
+      const cleanedVal = state.cleaned[x.name]
+      const rawVal = state.raw[x.name]
+      const val = (cleanedVal && cleanedVal.trim()) || (rawVal && rawVal.trim()) || ""
+      if (val) otherVars[x.name] = val
+    }
+    cleanVariableDebounced(v, raw, script, otherVars, (cleaned) => {
       setState(
         (prev) =>
           prev && {
