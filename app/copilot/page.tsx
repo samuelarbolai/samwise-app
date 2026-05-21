@@ -116,22 +116,33 @@ export default function CopilotPage() {
       }
       const q = resp.qualification
 
-      // Build the cross-context bundle once from the WHOLE qualification
-      // doc. This is the richest disambiguation source we have for
-      // prefill — every cleaning call during the prefill sees the full
-      // prospect picture (life_stage_context, motivation, symbolic
-      // anchor, etc.) so it can resolve ambiguous wordings correctly
-      // (e.g. "defaulting" with romantic core_motivation → "settling
-      // for mediocre women", NOT "incumplimiento").
+      // Build the cross-context bundle from the WHOLE qualification doc.
+      // Richest disambiguation source available at prefill time.
       const qOtherVars: Record<string, string> = {}
       for (const [k, v] of Object.entries(q)) {
         if (typeof v === "string" && v.trim()) qOtherVars[k] = v
       }
 
-      // Find each match against DEMO_CALL_VARIABLES and update state.
-      // For cleanable fields we trigger cleanVariableDebounced exactly
-      // as VariablesTable's setRaw does; for non-cleanable fields we
-      // mirror raw into cleaned directly.
+      // ── Reset before fill ────────────────────────────────────────────
+      // Build a brand-new SessionState from scratch and apply it in ONE
+      // setState call. This guarantees no `cleaned[name]` from a prior
+      // prospect's session survives into this prospect's render. Without
+      // this reset, only the variables in QUALIFICATION_TO_DEMO_FIELDS
+      // would get overwritten; everything else (Phase 5 captures,
+      // self_destructive_behaviour, rep_notes, etc.) would keep the
+      // previous prospect's values from the restored localStorage state.
+      // ────────────────────────────────────────────────────────────────
+      const fresh = makeEmptyState(DEMO_CALL_VARIABLES)
+      // Preserve the qualification's prospectKey so the demoCalls doc
+      // written at save time inherits it (cross-collection linkage).
+      if (typeof q.prospectKey === "string" && q.prospectKey) {
+        fresh.qualificationProspectKey = q.prospectKey
+      }
+      const cleaningTriggers: Array<{
+        variable: (typeof DEMO_CALL_VARIABLES)[number]
+        value: string
+      }> = []
+
       let filledCount = 0
       for (const key of QUALIFICATION_TO_DEMO_FIELDS) {
         const value = q[key]
@@ -139,42 +150,48 @@ export default function CopilotPage() {
         const variable = DEMO_CALL_VARIABLES.find((v) => v.name === key)
         if (!variable) continue
 
-        setState((prev) =>
-          prev ? { ...prev, raw: { ...prev.raw, [key]: value } } : prev,
-        )
+        fresh.raw[key] = value
         if (!variable.cleanable) {
-          setState((prev) =>
-            prev
-              ? { ...prev, cleaned: { ...prev.cleaned, [key]: value } }
-              : prev,
-          )
+          fresh.cleaned[key] = value
         } else {
-          setState((prev) =>
-            prev
-              ? { ...prev, cleaning: { ...prev.cleaning, [key]: true } }
-              : prev,
-          )
-          cleanVariableDebounced(variable, value, script, qOtherVars, (cleaned) => {
+          fresh.cleaning[key] = true
+          // No initial cleaned seed — fresh.cleaned[key] is "" from
+          // makeEmptyState. During the ~1.5s cleaning window the
+          // script-pane fallback renders {{var_name}}, which is
+          // readable and signals the cleaning-in-flight state.
+          cleaningTriggers.push({ variable, value })
+        }
+        filledCount++
+      }
+
+      setState(fresh)
+
+      for (const { variable, value } of cleaningTriggers) {
+        cleanVariableDebounced(
+          variable,
+          value,
+          script,
+          qOtherVars,
+          (cleaned) => {
             setState((prev) =>
               prev
                 ? {
                     ...prev,
-                    cleaned: { ...prev.cleaned, [key]: cleaned },
-                    cleaning: { ...prev.cleaning, [key]: false },
+                    cleaned: { ...prev.cleaned, [variable.name]: cleaned },
+                    cleaning: { ...prev.cleaning, [variable.name]: false },
                   }
                 : prev,
             )
-          })
-        }
-        filledCount++
+          },
+        )
       }
 
       const outcomeLabel = q.outcome ?? "unknown outcome"
       toast.success(`Qualification loaded (${outcomeLabel})`, {
         description:
           filledCount > 0
-            ? `Pre-filled ${filledCount} variable${filledCount === 1 ? "" : "s"} from the Fit Assessment.`
-            : "No overlapping fields to pre-fill.",
+            ? `Pre-filled ${filledCount} variable${filledCount === 1 ? "" : "s"} from the Fit Assessment. Prior session data cleared.`
+            : "No overlapping fields to pre-fill. Prior session data cleared.",
       })
     } catch (err) {
       toast.error("Could not load qualification", {

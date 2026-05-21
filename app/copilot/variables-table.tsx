@@ -107,15 +107,19 @@ export function VariablesTable({
   }
 
   const handleSave = async () => {
-    if (!state.cleaned.prospect_name) {
+    if (!state.cleaned.prospect_name && !state.qualificationProspectKey) {
       toast.error("Missing prospect_name", {
-        description: "Cannot save without it.",
+        description: "Cannot save without prospect_name or a loaded qualification.",
       })
       return
     }
     try {
-      const { rowNumber } = await appendDemoCallRow(state.cleaned)
-      toast.success(`Saved to funnel sheet (row ${rowNumber}).`)
+      const { docId } = await appendDemoCallRow({
+        raw: state.raw,
+        cleaned: state.cleaned,
+        qualificationProspectKey: state.qualificationProspectKey,
+      })
+      toast.success(`Saved (doc ${docId}).`)
       clearSessionState()
       window.location.href = "/copilot"
     } catch (err) {
@@ -179,7 +183,7 @@ export function VariablesTable({
         </section>
       ))}
       <Button onClick={handleSave} className="mt-4">
-        Save to funnel sheet
+        Save call
       </Button>
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import type { LoadedPhase, ScriptBlock } from "@/lib/copilot/load-script"
+import { DEMO_CALL_VARIABLES } from "./demo-call-config"
 
 interface ScriptPaneProps {
   phases: LoadedPhase[]
@@ -28,18 +29,18 @@ function renderText(
         </span>,
       )
     } else {
-      // Cell unfilled (either rep hasn't typed yet, or the qualification
-      // didn't have a value for it). Show "Not filled by user" so the
-      // rep skimming the script sees the gap explicitly — and so the
-      // sentence still reads as grammatical English/Spanish prose
-      // instead of a bare {{var_name}}.
+      // Cell unfilled (the rep hasn't typed yet AND the qualification
+      // didn't have a value for it, OR cleaning is in flight). Render
+      // the literal placeholder string so the rep can SEE which variable
+      // is missing and find the row to fill. Italic + muted so a real
+      // cleaned value next to it pops visually.
       parts.push(
         <span
           key={key++}
           className="italic text-muted-foreground/60"
           title={`{{${name}}}`}
         >
-          Not filled by user
+          {`{{${name}}}`}
         </span>,
       )
     }
@@ -82,9 +83,50 @@ function resolveBlocks(p: LoadedPhase): ScriptBlock[] {
   return []
 }
 
+// Passive scroll target — used by the IntersectionObserver as the rep
+// reads the script. Simple direct mapping: scroll to the matching
+// vars-phase-{n} if it exists; no-op otherwise. This is "what is the
+// rep reading right now," not "what variable do they want to fix."
 function scrollVarsToPhase(phaseNumber: LoadedPhase["number"]) {
   const target = document.getElementById(`vars-phase-${String(phaseNumber)}`)
   target?.scrollIntoView({ behavior: "smooth", block: "start" })
+}
+
+// Deliberate-click target — used when the rep clicks a script phase
+// title. Intent: "I saw a weird substitution in this phase; take me to
+// the variable so I can fix it." Parses the phase's say blocks for the
+// first {{var_name}} whose variable exists in DEMO_CALL_VARIABLES,
+// scrolls to that variable's vars-pane phase section. Falls back to
+// the passive mapping if the phase has no resolvable substitutions.
+function scrollVarsToFirstSubstitutedVar(phase: LoadedPhase) {
+  const blocks: ScriptBlock[] =
+    Array.isArray(phase.blocks) && phase.blocks.length > 0
+      ? phase.blocks
+      : (phase as unknown as { text?: string }).text
+        ? [{ kind: "say", text: (phase as unknown as { text: string }).text }]
+        : []
+  const re = /\{\{(\w+)\}\}/g
+  for (const block of blocks) {
+    if (block.kind !== "say") continue
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(block.text)) !== null) {
+      const varName = m[1]
+      const variable = DEMO_CALL_VARIABLES.find((v) => v.name === varName)
+      if (!variable) continue
+      const target = document.getElementById(
+        `vars-phase-${String(variable.phase)}`,
+      )
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" })
+        return
+      }
+    }
+  }
+  // Fallback: no substitutions found OR none resolved to a known
+  // variable. Scroll to the matching vars-phase by phase number if it
+  // exists; else no-op.
+  scrollVarsToPhase(phase.number)
 }
 
 export function ScriptPane({ phases, cleaned }: ScriptPaneProps) {
@@ -133,9 +175,9 @@ export function ScriptPane({ phases, cleaned }: ScriptPaneProps) {
           >
             <button
               type="button"
-              onClick={() => scrollVarsToPhase(p.number)}
+              onClick={() => scrollVarsToFirstSubstitutedVar(p)}
               className="text-xs font-semibold text-muted-foreground uppercase tracking-widest hover:text-foreground transition cursor-pointer text-left w-full"
-              title="Jump variables pane to this phase"
+              title="Jump variables pane to the first variable substituted here"
             >
               {typeof p.number === "number" ? `Phase ${p.number}` : p.number} —{" "}
               {p.title}

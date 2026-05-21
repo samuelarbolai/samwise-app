@@ -107,16 +107,14 @@ export function cleanVariableDebounced(
     return
   }
 
-  // When the rep hasn't typed anything for a cleanable variable AND
-  // the prefill didn't fill it either, emit an explicit placeholder so
-  // the rep can SEE the gap in the substituted script ("Has trabajado
-  // en Not filled by user") instead of an invisible blank that reads
-  // as broken grammar. The rep types over the placeholder when they
-  // capture the value live.
+  // When the rep hasn't typed anything for a cleanable variable, emit
+  // an empty string. The script-pane fallback then renders the literal
+  // {{var_name}} placeholder so the rep can spot the gap and find the
+  // row to fill. Display placeholder logic is centralized in
+  // script-pane — the cleaning layer no longer synthesizes a string.
   if (!rawValue.trim()) {
-    const placeholder = "Not filled by user"
-    resultCache.set(key, placeholder)
-    onResult(placeholder)
+    resultCache.set(key, "")
+    onResult("")
     return
   }
 

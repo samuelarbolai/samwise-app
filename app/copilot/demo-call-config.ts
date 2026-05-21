@@ -17,16 +17,24 @@
 // with the surrounding script slots; it tells Gemini what to extract from
 // the rep's raw note and what to ignore. Drawn from the synthesis-prompt
 // skill's Rule 7 (tag-by-tag semantics) + the samwise-script-work skill.
+//
+// ORDER PRINCIPLE (2026-05-21): the array order matches the order the
+// rep encounters / fills variables during the call. Pre-call holds rep-
+// prep workflow first, then qualification-prefilled (in Phase 1.5
+// reflection-order, then context). Live-captured groups follow in
+// script-phase order. The Phase 2 group was dissolved (its only var was
+// prefilled, moved to pre-call). The Phase 10 group was renamed to
+// Phase 14 to match the script phase where those cost vars are
+// actually captured (alternatives rebound).
 // =====================================================================
 
 export type DemoCallPhase =
   | "pre-call"
-  | 2
   | 3
   | 5
   | 7
   | 8
-  | 10
+  | 14
   | "post-call"
 
 export type InputKind = "text" | "textarea" | "select" | "number" | "date"
@@ -63,64 +71,13 @@ export const DEMO_CALL_SHEET_TAB = "Demo call"
 export const KNOWN_REPS = ["Samuel Giraldo Concha", "Maria"]
 
 export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
-  // ---- Pre-call ----
+  // ---- Pre-call: rep-prep workflow ----
   { name: "call_date",        label: "Call date",         phase: "pre-call", meaning: "Date of the call (YYYY-MM-DD).", inputKind: "date",   cleanable: false },
   { name: "rep_name",         label: "Rep",               phase: "pre-call", meaning: "Who ran the call.",               inputKind: "select", options: KNOWN_REPS, cleanable: false },
   { name: "prospect_name",    label: "Prospect name",     phase: "pre-call", meaning: "Lookup key; the prospect's name.",inputKind: "text",   cleanable: false },
   { name: "age_range",        label: "Age range",         phase: "pre-call", meaning: "Age bracket.",                    inputKind: "select", options: ["<20","20-29","30-39","40-49","50-59","60+"], cleanable: false },
   { name: "country",          label: "Country",           phase: "pre-call", meaning: "Country.",                        inputKind: "text",   cleanable: false },
   { name: "referral_source",  label: "Referral source",   phase: "pre-call", meaning: "How they got here (referral name / ad / organic).", inputKind: "text", cleanable: false },
-
-  // ---- From qualification (prefilled by Pre-fill from qualification) ----
-  // These fields are captured during /qualify and arrive here via the
-  // loadQualification → prefill flow. They're not captured live during
-  // the Demo Call — the rep references them while reading the script,
-  // and the script substitutes their cleaned forms via {{var}} slots.
-  {
-    name: "life_stage_context",
-    label: "Life stage context",
-    phase: "pre-call",
-    meaning: "Where they are right now: work, family, what's loud.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "The prospect's current life context — what's happening for them right now (work, family, transitions, what's loud or stressful). NOT the behaviour, NOT motivation. Use it primarily to disambiguate other variables. Examples: 'construyendo nuestra empresa, casado con dos hijas pequeñas', 'finishing my thesis while taking care of my mother'.",
-  },
-  {
-    name: "problem_duration_self_reported",
-    label: "Problem duration",
-    phase: "pre-call",
-    meaning: "How long they've been struggling with this.",
-    inputKind: "text",
-    cleanable: true,
-    frameworkSemantics: "How long the prospect has been struggling with the behaviour, in their own words. Examples: 'dos años', 'desde la universidad', 'mucho tiempo, quizás desde la secundaria'. Keep verbatim phrasing where possible; translate to the script language if needed but preserve their level of specificity.",
-  },
-  {
-    name: "symbolic_anchor_type",
-    label: "Symbolic anchor type",
-    phase: "pre-call",
-    meaning: "Tradition / philosophy / esoteric / hyper-rational / none.",
-    inputKind: "select",
-    options: ["religious", "philosophical", "esoteric", "hyper-rational", "none"],
-    cleanable: false,
-  },
-  {
-    name: "symbolic_anchor_description",
-    label: "Symbolic anchor description",
-    phase: "pre-call",
-    meaning: "What they draw strength from, in their own words.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "The prospect's own description of the tradition, philosophy, or set of principles they draw strength from. Used in Phase 1.5 reflect AND in Phase 7a mantra-building, so the cleaned form must read naturally as the OBJECT of phrases like 'te apoyás en ___' and 'sacás fuerza de ___'. Preserve the prospect's specific references (book titles, deities, practices) and their language. Examples: 'la oración católica de mi infancia', 'la filosofía estoica, sobre todo Marco Aurelio', 'rituales judíos y el simbolismo del Señor de los Anillos'. Do NOT abstract away their specifics into a generic noun like 'spirituality' or 'religión'.",
-  },
-  {
-    name: "alternatives_exhaustion_level",
-    label: "Alternatives exhaustion level",
-    phase: "pre-call",
-    meaning: "How much they've tried already (your judgment).",
-    inputKind: "select",
-    options: ["low", "medium", "high"],
-    cleanable: false,
-  },
   {
     name: "intake_behaviour",
     label: "Intake behaviour",
@@ -149,18 +106,96 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "Brief description of any prior interactions with the prospect. If none, return 'None'.",
   },
 
-  // ---- Phase 2 ----
+  // ---- Pre-call: prefilled from qualification ----
+  // Ordered by first-use in the script. Phase 1.5 reflects (in this
+  // order): behaviour, motivation, framework/anchor, journey/alternatives.
+  // The remaining three (life_stage_context, problem_duration,
+  // alternatives_exhaustion_level) are background mental-model context
+  // not directly substituted, so they come last.
   {
     name: "behaviour_to_change",
     label: "Behaviour to change",
-    phase: 2,
+    phase: "pre-call",
     meaning: "The specific behaviour (short label).",
     inputKind: "text",
     cleanable: true,
     frameworkSemantics: "A label (1-3 words ideally, up to 7 if a single noun can't capture the prospect's meaning) for the SPECIFIC behaviour the prospect wants to change. NOT the motivation, NOT consequences, NOT context. Examples of GOOD outputs: 'doomscrolling', 'road rage', 'procrastinación', 'salir con mujeres mediocres', 'comer compulsivamente de noche'. CRITICAL: preserve the prospect's specific framing. Do NOT collapse a vivid description into an abstract generic noun. If the prospect said 'defaulting for hanging out with mediocre women', the right output is 'salir con mujeres mediocres' or 'conformarme con cualquier mujer' — NEVER 'incumplimiento' or 'conformismo' (those abstract away from what they actually said). Use OTHER VARIABLES (core_motivation, life_stage_context) to disambiguate when a word has multiple senses.",
   },
+  {
+    name: "core_motivation",
+    label: "Core motivation",
+    phase: "pre-call",
+    meaning: "What they're really trying to unlock.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "The prospect's life-stakes reason for wanting to change — what they stand to gain or lose in their actual life if they do or don't change. NOT the behaviour itself (that's behaviour_to_change). NOT historical context. NOT alternatives tried. Format as a first-person infinitive-led noun phrase or short clause that completes sentences like 'la razón de fondo es ___', 'querés ___', 'los resultados para ___'. Examples: 'ser un padre responsable para mis dos hijas', 'construir un negocio en EE.UU.', 'terminar mi tesis este año'. Preserve emotionally loaded language and personal stakes.",
+  },
+  {
+    name: "symbolic_anchor_type",
+    label: "Symbolic anchor type",
+    phase: "pre-call",
+    meaning: "Tradition / philosophy / esoteric / hyper-rational / none.",
+    inputKind: "select",
+    options: ["religious", "philosophical", "esoteric", "hyper-rational", "none"],
+    cleanable: false,
+  },
+  {
+    name: "symbolic_anchor_description",
+    label: "Symbolic anchor description",
+    phase: "pre-call",
+    meaning: "What they draw strength from, in their own words.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "The prospect's own description of the tradition, philosophy, or set of principles they draw strength from. Used in Phase 1.5 reflect AND in Phase 7a mantra-building, so the cleaned form must read naturally as the OBJECT of phrases like 'te apoyás en ___' and 'sacás fuerza de ___'. Preserve the prospect's specific references (book titles, deities, practices) and their language. Examples: 'la oración católica de mi infancia', 'la filosofía estoica, sobre todo Marco Aurelio', 'rituales judíos y el simbolismo del Señor de los Anillos'. Do NOT abstract away their specifics into a generic noun like 'spirituality' or 'religión'.",
+  },
+  {
+    name: "alternatives_tried",
+    label: "Alternatives tried",
+    phase: "pre-call",
+    meaning: "What else they've tried.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "Brief list of solutions the prospect has previously tried. Comma-separated phrase. Examples: 'terapia espiritual, coaching de productividad', 'Pomodoro apps, productivity coach'. In the language the prospect used to describe them.",
+  },
+  {
+    name: "why_alternatives_failed",
+    label: "Why alternatives failed",
+    phase: "pre-call",
+    meaning: "Why those didn't work.",
+    inputKind: "textarea",
+    cleanable: true,
+    verbatim: true,
+    frameworkSemantics: "The reason the previous alternatives didn't deliver lasting change for the prospect. In their voice, first-person. Preserve specifics ('insights didn't stick between sessions', 'cuando se acabó el plan, todo se desvaneció').",
+  },
+  {
+    name: "life_stage_context",
+    label: "Life stage context",
+    phase: "pre-call",
+    meaning: "Where they are right now: work, family, what's loud.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics: "The prospect's current life context — what's happening for them right now (work, family, transitions, what's loud or stressful). NOT the behaviour, NOT motivation. Use it primarily to disambiguate other variables. Examples: 'construyendo nuestra empresa, casado con dos hijas pequeñas', 'finishing my thesis while taking care of my mother'.",
+  },
+  {
+    name: "problem_duration_self_reported",
+    label: "Problem duration",
+    phase: "pre-call",
+    meaning: "How long they've been struggling with this.",
+    inputKind: "text",
+    cleanable: true,
+    frameworkSemantics: "How long the prospect has been struggling with the behaviour, in their own words. Examples: 'dos años', 'desde la universidad', 'mucho tiempo, quizás desde la secundaria'. Keep verbatim phrasing where possible; translate to the script language if needed but preserve their level of specificity.",
+  },
+  {
+    name: "alternatives_exhaustion_level",
+    label: "Alternatives exhaustion level",
+    phase: "pre-call",
+    meaning: "How much they've tried already (your judgment).",
+    inputKind: "select",
+    options: ["low", "medium", "high"],
+    cleanable: false,
+  },
 
-  // ---- Phase 3 ----
+  // ---- Phase 3 — Bond ----
   {
     name: "referral",
     label: "Referral",
@@ -169,15 +204,6 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     inputKind: "textarea",
     cleanable: true,
     frameworkSemantics: "Why the prospect came to this call or who recommended Samwise. Concise — a name or short reason. First-person where it fits ('me lo recomendó X', 'vi un anuncio').",
-  },
-  {
-    name: "core_motivation",
-    label: "Core motivation",
-    phase: 3,
-    meaning: "What they're really trying to unlock.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "The prospect's life-stakes reason for wanting to change — what they stand to gain or lose in their actual life if they do or don't change. NOT the behaviour itself (that's behaviour_to_change). NOT historical context. NOT alternatives tried. Format as a first-person infinitive-led noun phrase or short clause that completes sentences like 'la razón de fondo es ___', 'querés ___', 'los resultados para ___'. Examples: 'ser un padre responsable para mis dos hijas', 'construir un negocio en EE.UU.', 'terminar mi tesis este año'. Preserve emotionally loaded language and personal stakes.",
   },
   {
     name: "expectation",
@@ -198,7 +224,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "The prospect's OWN framing of the self-destructive behaviour — often the same content as behaviour_to_change but in their voice and with more texture. NOT a clinical diagnosis (the framework deliberately externalizes this as a pattern, not as the prospect's identity).",
   },
 
-  // ---- Phase 5 ----
+  // ---- Phase 5 — Desidentification demo ----
   {
     name: "thoughts_during_relapse",
     label: "Thoughts during relapse",
@@ -265,10 +291,10 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   { name: "grado_de_identificacion",   label: "Identification level",     phase: 5, meaning: "Rep's read on identification level.", inputKind: "select", options: ["low","medium","high"], cleanable: false },
 
-  // ---- Phase 7 ----
+  // ---- Phase 7 — Solution intro ----
   { name: "biologic_symbolic_analogy", label: "Biologic/symbolic analogy", phase: 7, meaning: "Analogy chosen for them.", inputKind: "select", options: ["flu","cold","allergy","diabetes","cancer","other"], cleanable: false },
 
-  // ---- Phase 8 ----
+  // ---- Phase 8 — Mantra commitment ----
   {
     name: "clinical_picture_description",
     label: "Clinical picture description",
@@ -279,36 +305,22 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "A short externalising description of the prospect's pattern that goes inside their disidentification mantra ('Estoy enfermo con ___'). Should externalise the problem as a condition the prospect HAS, not who they ARE. Examples: 'una evasión compulsiva del trabajo bajo ansiedad', 'un patrón de huida frente a tareas difíciles'. Do not write a clinical diagnosis in the output — externalise in the prospect's voice and metaphor.",
   },
 
-  // ---- Phase 10 ----
-  {
-    name: "alternatives_tried",
-    label: "Alternatives tried",
-    phase: 10,
-    meaning: "What else they've tried.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "Brief list of solutions the prospect has previously tried. Comma-separated phrase. Examples: 'terapia espiritual, coaching de productividad', 'Pomodoro apps, productivity coach'. In the language the prospect used to describe them.",
-  },
-  {
-    name: "why_alternatives_failed",
-    label: "Why alternatives failed",
-    phase: 10,
-    meaning: "Why those didn't work.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "The reason the previous alternatives didn't deliver lasting change for the prospect. In their voice, first-person. Preserve specifics ('insights didn't stick between sessions', 'cuando se acabó el plan, todo se desvaneció').",
-  },
+  // ---- Phase 14 — Alternatives rebound (live capture of cost vars) ----
+  // Renamed from "Phase 10" — the script phase where the rep actually
+  // captures these is Phase 14 (Handling the alternatives rebound). The
+  // upstream prefilled variables alternatives_tried + why_alternatives_failed
+  // moved to pre-call; only the cost vars remain here as live capture.
   {
     name: "time_spent_in_alternatives",
     label: "Time spent in alternatives",
-    phase: 10,
+    phase: 14,
     meaning: "How long they've been trying.",
     inputKind: "text",
     cleanable: true,
     frameworkSemantics: "Total time the prospect has spent on previous alternatives. Examples: '3 años', '6 weeks', '1 year'. In the language used.",
   },
-  { name: "total_money_spent_in_alternatives", label: "Total money spent (USD)", phase: 10, meaning: "Total spent on alternatives.",   inputKind: "number",   cleanable: false },
-  { name: "monthly_budget_willingness",     label: "Monthly budget willingness (USD)", phase: 10, meaning: "Monthly budget they'd invest.", inputKind: "number", cleanable: false },
+  { name: "total_money_spent_in_alternatives", label: "Total money spent (USD)", phase: 14, meaning: "Total spent on alternatives.",   inputKind: "number",   cleanable: false },
+  { name: "monthly_budget_willingness",     label: "Monthly budget willingness (USD)", phase: 14, meaning: "Monthly budget they'd invest.", inputKind: "number", cleanable: false },
 
   // ---- Post-call ----
   { name: "outcome",   label: "Outcome",    phase: "post-call", meaning: "Call outcome.", inputKind: "select", options: ["closed","follow-up","disqualified","no"], cleanable: false },
@@ -335,6 +347,10 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
 // Column order in the funnel sheet's "Demo call" tab. Must match the
 // sheet's header row exactly. If the sheet header changes, update this
 // list — appendDemoCallRow writes in this order.
+//
+// NOTE: this constant is currently UNUSED — appendDemoCallRow in the
+// backend uses its own DEMO_CALL_COLUMNS list as the authoritative
+// source. Kept here for reference + as a forward-compat slot.
 export const FUNNEL_SHEET_COLUMNS: string[] = DEMO_CALL_VARIABLES.map(
   (v) => v.name,
 )

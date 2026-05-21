@@ -1,15 +1,21 @@
 import type { LoadedScript } from "./load-script"
 import type { DemoCallVariable } from "@/app/copilot/demo-call-config"
 
-// Bumped to v2 when the script phase shape changed from { text } to
-// { blocks: [{ kind, text }] }. Any session persisted under v1 is silently
-// ignored on mount and will appear as a fresh URL gate to the rep.
-const KEY = "copilot:session:v2"
+// Bumped to v3 when SessionState gained `qualificationProspectKey` to
+// preserve linkage between the qualifications + demoCalls Firestore
+// collections at save time. Any session persisted under v1 or v2 is
+// silently ignored on mount and appears as a fresh URL gate.
+const KEY = "copilot:session:v3"
 
 export interface SessionState {
   raw: Record<string, string>
   cleaned: Record<string, string>
   cleaning: Record<string, boolean>
+  // Set during handleLoadQualification. Forwarded to appendDemoCallRow
+  // at save time so the resulting demoCalls doc inherits the same
+  // prospectKey as the qualifications doc — clean cross-collection
+  // linkage without the rep having to retype an email.
+  qualificationProspectKey?: string
 }
 
 export interface PersistedSession {
