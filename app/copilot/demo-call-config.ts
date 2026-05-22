@@ -54,12 +54,17 @@ export interface DemoCallVariable {
    * what to extract vs ignore, what shape the cleaned output should take,
    * and any verbatim/voice rules specific to this variable. */
   frameworkSemantics?: string
+  /** Initial value seeded into both raw and cleaned when a fresh session is
+   * created. Used by phase-condition variables (e.g. fit_state) so the
+   * default branch of the script is visible before the rep touches anything. */
+  defaultValue?: string
 }
 
-// Pre-filled default Doc URL — the canonical v0.3 Demo script.
+// Pre-filled default Doc URL — the canonical Demo script.
+// (v0.3 was deprecated 2026-05; the active Doc is the one below.)
 // The rep can override this in the URL input at /copilot.
 export const DEFAULT_DEMO_SCRIPT_DOC_URL =
-  "https://docs.google.com/document/d/1hntQClh8TUUVYOw148sFGRhy33JqtleuvI5BC8rM4eg/edit"
+  "https://docs.google.com/document/d/1sBHuGaXCFaP8cmQdUgNpoQYwCq3L4-OfDMDoPR73a5g/edit"
 
 // Funnel-sheet target for appendDemoCallRow.
 export const FUNNEL_SHEET_ID =
@@ -290,6 +295,16 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "How the prospect sees their life or themselves in the moment of relapse. Often dark, defeated, despairing. First-person. Preserve emotional charge — do not soften.",
   },
   { name: "grado_de_identificacion",   label: "Identification level",     phase: 5, meaning: "Rep's read on identification level.", inputKind: "select", options: ["low","medium","high"], cleanable: false },
+  {
+    name: "fit_state",
+    label: "Fit state (post-demo)",
+    phase: 5,
+    meaning: "Re-classification after the desidentification demo. Drives [CONDITION] phase visibility in the script-pane.",
+    inputKind: "select",
+    options: ["qualified", "still_disqualified"],
+    cleanable: false,
+    defaultValue: "qualified",
+  },
 
   // ---- Phase 7 — Solution intro ----
   { name: "biologic_symbolic_analogy", label: "Biologic/symbolic analogy", phase: 7, meaning: "Analogy chosen for them.", inputKind: "select", options: ["flu","cold","allergy","diabetes","cancer","other"], cleanable: false },

@@ -29,8 +29,9 @@ export function makeEmptyState(vars: DemoCallVariable[]): SessionState {
   const cleaned: Record<string, string> = {}
   const cleaning: Record<string, boolean> = {}
   for (const v of vars) {
-    raw[v.name] = ""
-    cleaned[v.name] = ""
+    const initial = v.defaultValue ?? ""
+    raw[v.name] = initial
+    cleaned[v.name] = initial
     cleaning[v.name] = false
   }
   // Auto-set call_date today.

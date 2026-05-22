@@ -83,6 +83,31 @@ function resolveBlocks(p: LoadedPhase): ScriptBlock[] {
   return []
 }
 
+// A phase may opt into conditional visibility by including a single
+// `[CONDITION: var=value]` line outside any [SAY] block. The Gemini
+// parser renders that line as a note block; this helper extracts the
+// pair from the first matching note in the phase.
+const CONDITION_RE = /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w-]+)\s*\]\s*$/
+
+function parsePhaseCondition(
+  phase: LoadedPhase,
+): { var: string; value: string } | null {
+  for (const block of phase.blocks) {
+    if (block.kind !== "note") continue
+    const m = CONDITION_RE.exec(block.text)
+    if (m) return { var: m[1], value: m[2] }
+  }
+  return null
+}
+
+// Removes the [CONDITION: …] note from the rendered output so the rep
+// doesn't see the marker line itself in the script pane.
+function blocksWithoutConditionMarker(blocks: ScriptBlock[]): ScriptBlock[] {
+  return blocks.filter(
+    (b) => !(b.kind === "note" && CONDITION_RE.test(b.text)),
+  )
+}
+
 // Passive scroll target — used by the IntersectionObserver as the rep
 // reads the script. Simple direct mapping: scroll to the matching
 // vars-phase-{n} if it exists; no-op otherwise. This is "what is the
@@ -166,30 +191,37 @@ export function ScriptPane({ phases, cleaned }: ScriptPaneProps) {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      {phases.map((p) => (
-        <section key={String(p.number)} className="mb-10">
-          <h2
-            id={`script-phase-${String(p.number)}`}
-            data-script-phase={String(p.number)}
-            className="mb-4 scroll-mt-4"
-          >
-            <button
-              type="button"
-              onClick={() => scrollVarsToFirstSubstitutedVar(p)}
-              className="text-xs font-semibold text-muted-foreground uppercase tracking-widest hover:text-foreground transition cursor-pointer text-left w-full"
-              title="Jump variables pane to the first variable substituted here"
+      {phases.map((p) => {
+        const condition = parsePhaseCondition(p)
+        if (condition && cleaned[condition.var] !== condition.value) {
+          return null
+        }
+        const visibleBlocks = blocksWithoutConditionMarker(resolveBlocks(p))
+        return (
+          <section key={String(p.number)} className="mb-10">
+            <h2
+              id={`script-phase-${String(p.number)}`}
+              data-script-phase={String(p.number)}
+              className="mb-4 scroll-mt-4"
             >
-              {typeof p.number === "number" ? `Phase ${p.number}` : p.number} —{" "}
-              {p.title}
-            </button>
-          </h2>
-          <div className="flex flex-col gap-3">
-            {resolveBlocks(p).map((b, i) => (
-              <Block key={i} block={b} cleaned={cleaned} />
-            ))}
-          </div>
-        </section>
-      ))}
+              <button
+                type="button"
+                onClick={() => scrollVarsToFirstSubstitutedVar(p)}
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-widest hover:text-foreground transition cursor-pointer text-left w-full"
+                title="Jump variables pane to the first variable substituted here"
+              >
+                {typeof p.number === "number" ? `Phase ${p.number}` : p.number} —{" "}
+                {p.title}
+              </button>
+            </h2>
+            <div className="flex flex-col gap-3">
+              {visibleBlocks.map((b, i) => (
+                <Block key={i} block={b} cleaned={cleaned} />
+              ))}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
