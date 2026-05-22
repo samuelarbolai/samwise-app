@@ -50,6 +50,26 @@ function renderText(
   return parts
 }
 
+// Gemini's loadCallScript parser coalesces paragraph breaks in the source
+// Doc into single `\n` between paragraphs (the blank lines are dropped).
+// `whitespace-pre-wrap` honors those single `\n` as tight line breaks with
+// no vertical spacing — which renders long SAY blocks as walls of text.
+// Splitting on `\n` and emitting each non-empty line as a `<p>` restores
+// the paragraph rhythm the rep needs to scan the script during a call.
+function renderParagraphs(
+  text: string,
+  cleaned: Record<string, string>,
+  spacingClass: string,
+): React.ReactNode[] {
+  const paragraphs = text.split("\n").filter((p) => p.trim() !== "")
+  if (paragraphs.length === 0) return []
+  return paragraphs.map((p, i) => (
+    <p key={i} className={spacingClass}>
+      {renderText(p, cleaned)}
+    </p>
+  ))
+}
+
 function Block({
   block,
   cleaned,
@@ -59,15 +79,15 @@ function Block({
 }) {
   if (block.kind === "say") {
     return (
-      <div className="rounded-md border-2 border-foreground/25 bg-card p-4 leading-relaxed whitespace-pre-wrap text-[15px] text-foreground">
-        {renderText(block.text, cleaned)}
+      <div className="rounded-md border-2 border-foreground/25 bg-card p-4 leading-relaxed text-[15px] text-foreground">
+        {renderParagraphs(block.text, cleaned, "mb-3 last:mb-0")}
       </div>
     )
   }
   return (
-    <p className="px-4 text-xs italic text-muted-foreground whitespace-pre-wrap leading-relaxed">
-      {renderText(block.text, cleaned)}
-    </p>
+    <div className="px-4 text-xs italic text-muted-foreground leading-relaxed">
+      {renderParagraphs(block.text, cleaned, "mb-2 last:mb-0")}
+    </div>
   )
 }
 
