@@ -295,21 +295,11 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "How the prospect sees their life or themselves in the moment of relapse. Often dark, defeated, despairing. First-person. Preserve emotional charge — do not soften.",
   },
   { name: "grado_de_identificacion",   label: "Identification level",     phase: 5, meaning: "Rep's read on identification level.", inputKind: "select", options: ["low","medium","high"], cleanable: false },
-  {
-    name: "fit_state",
-    label: "Fit state (post-demo)",
-    phase: 5,
-    meaning: "Re-classification after the desidentification demo. Drives [CONDITION] phase visibility in the script-pane.",
-    inputKind: "select",
-    options: ["qualified", "still_disqualified"],
-    cleanable: false,
-    defaultValue: "qualified",
-  },
 
   // ---- Phase 7 — Solution intro ----
   { name: "biologic_symbolic_analogy", label: "Biologic/symbolic analogy", phase: 7, meaning: "Analogy chosen for them.", inputKind: "select", options: ["flu","cold","allergy","diabetes","cancer","other"], cleanable: false },
 
-  // ---- Phase 8 — Mantra commitment ----
+  // ---- Phase 8 — Mantra commitment + post-demo re-classify ----
   {
     name: "clinical_picture_description",
     label: "Clinical picture description",
@@ -318,6 +308,16 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     inputKind: "textarea",
     cleanable: true,
     frameworkSemantics: "A short externalising description of the prospect's pattern that goes inside their disidentification mantra ('Estoy enfermo con ___'). Should externalise the problem as a condition the prospect HAS, not who they ARE. Examples: 'una evasión compulsiva del trabajo bajo ansiedad', 'un patrón de huida frente a tareas difíciles'. Do not write a clinical diagnosis in the output — externalise in the prospect's voice and metaphor.",
+  },
+  {
+    name: "fit_state",
+    label: "Fit state (post-demo)",
+    phase: 8,
+    meaning: "Re-classification after the full Phase 5-8 desidentification arc. Drives [CONDITION] phase visibility in the script-pane: phases 9-15 (close path) show when 'qualified'; phases 16-17 (rebound) show when 'still_disqualified'.",
+    inputKind: "select",
+    options: ["qualified", "still_disqualified"],
+    cleanable: false,
+    defaultValue: "qualified",
   },
 
   // ---- Phase 14 — Alternatives rebound (live capture of cost vars) ----

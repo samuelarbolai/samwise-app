@@ -84,9 +84,12 @@ function resolveBlocks(p: LoadedPhase): ScriptBlock[] {
 }
 
 // A phase may opt into conditional visibility by including a single
-// `[CONDITION: var=value]` line outside any [SAY] block. The Gemini
-// parser renders that line as a note block; this helper extracts the
-// pair from the first matching note in the phase.
+// `[CONDITION: var=value]` line outside any [SAY] block. Gemini's parser
+// usually coalesces consecutive rep-only lines into one note block —
+// so the marker line typically arrives concatenated with the phase's
+// Goal line or other surrounding guidance (e.g. "[CONDITION: ...]\nGoal: ...").
+// Both helpers below operate per-line within note blocks instead of
+// requiring the whole block to match.
 const CONDITION_RE = /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w-]+)\s*\]\s*$/
 
 function parsePhaseCondition(
@@ -94,18 +97,34 @@ function parsePhaseCondition(
 ): { var: string; value: string } | null {
   for (const block of phase.blocks) {
     if (block.kind !== "note") continue
-    const m = CONDITION_RE.exec(block.text)
-    if (m) return { var: m[1], value: m[2] }
+    for (const line of block.text.split("\n")) {
+      const m = CONDITION_RE.exec(line)
+      if (m) return { var: m[1], value: m[2] }
+    }
   }
   return null
 }
 
-// Removes the [CONDITION: …] note from the rendered output so the rep
-// doesn't see the marker line itself in the script pane.
+// Removes the [CONDITION: …] line from each note block so the rep doesn't
+// see it in the rendered script. If a note block was nothing but the marker,
+// drop the block entirely; otherwise keep the remaining text.
 function blocksWithoutConditionMarker(blocks: ScriptBlock[]): ScriptBlock[] {
-  return blocks.filter(
-    (b) => !(b.kind === "note" && CONDITION_RE.test(b.text)),
-  )
+  const out: ScriptBlock[] = []
+  for (const b of blocks) {
+    if (b.kind !== "note") {
+      out.push(b)
+      continue
+    }
+    const filteredText = b.text
+      .split("\n")
+      .filter((line) => !CONDITION_RE.test(line))
+      .join("\n")
+      .trim()
+    if (filteredText) {
+      out.push({ kind: "note", text: filteredText })
+    }
+  }
+  return out
 }
 
 // Passive scroll target — used by the IntersectionObserver as the rep

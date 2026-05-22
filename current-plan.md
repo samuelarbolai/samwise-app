@@ -120,26 +120,30 @@ Apply each substitution in the Doc. Surrounding context is given so the user can
 - Internal variable names containing `_relapse` (`thoughts_during_relapse` etc.) — rep-facing only, never spoken. Leave alone.
 - "self-destructive habits" in rep-only Phase 2 instruction (`(doomscrolling, addictions, productivity, self-destructive habits)`) — rep-only guidance, not spoken. Leave alone for now; can revisit if it bleeds into rep voice during calls.
 
-#### Step A.2 — Append a re-classify beat at the end of Phase 5
+#### Step A.2 — Append a re-classify beat at the end of Phase 8
 
-After the existing `### 5b. Functional analysis of a setback` section (the table + the assessment line "At the end, write your own assessment: {{grado_de_identificacion}} = low / medium / high"), append this new sub-section:
+After Phase 8's mantra commitment (the [SAY] mantra block and the `Capture: {{clinical_picture_description}}` line), append this new sub-section. Relocated from "Phase 5c" in late 2026-05 — classification must happen after the FULL desidentification arc (Phases 5–8), not after Phase 5 alone, because Phases 6–8 are where the disqualified prospect actually sees the framework's value (and that recognition is what makes them a high-quality referrer).
 
 ```markdown
-### 5c. Re-classify fit after the desidentification demo
+## Phase 8.5 — Re-classify fit after the desidentification work
 
-⚠️ **Mandatory beat. Always run this.** Some prospects who looked qualified going into the demo engage with the reframe and clearly SEE the framework's value — but they receive it as valid for *someone else*, not for themselves right now. In Samuel's businessman demos (May 2026), this is the dominant pattern: the prospect recognizes the territory because they've had this kind of problem in their own past or in someone close to them. They're high-recognition prospects but their current identification with the behaviour is shallower than the fit assessment suggested. They're not buyers; they're high-quality potential referrers.
+[SAY]Acabamos de hacer un ejercicio importante. Voy a tomarme un momento para evaluar si lo que hicimos hoy nos permite continuar el proceso con vos.[/SAY]
 
-☞ **Ask yourself silently — do not say this aloud:** Did the reframe make the prospect see THEMSELVES in the problem right now? Or did they see the framework clearly but receive it as something valid for someone else?
+⚠️ **Mandatory beat. Always run this** — after the full Phase 5 → Phase 8 desidentification arc. The framework demo runs for EVERY prospect, qualified or not. Classification happens here, AFTER they've seen the framework, named the enemy, and said the mantra aloud.
+
+Some prospects who looked qualified going into the demo engage with the reframe and clearly SEE the framework's value — but they receive it as valid for *someone else*, not for themselves right now. In Samuel's businessman demos (May 2026), this is the dominant pattern: the prospect recognizes the territory because they've had this kind of problem in their own past or in someone close to them. They're high-recognition prospects but their current identification with the behaviour is shallower than the fit assessment suggested. They're not buyers; they're high-quality potential referrers.
+
+☞ **Ask yourself silently — do not say this aloud:** Did the desidentification work make the prospect see THEMSELVES in the problem right now? Or did they see the framework clearly but receive it as something valid for someone else?
 
 **Set `fit_state` in the variables table:**
 
-- `qualified` — the prospect saw themselves in it. They need this now. Continue to Phase 6.
-- `still_disqualified` — the prospect saw the framework clearly but received it as something for someone else (often because they've had similar problems in their past or close to them). Their current identification doesn't justify acting now. The script swaps to the rebound path — which capitalizes on their recognition by asking for referrals.
+- `qualified` — the prospect saw themselves in it. They need this now. Continue to Phase 9 (Roadmap).
+- `still_disqualified` — the prospect saw the framework clearly but received it as something for someone else (often because they've had similar problems in their past or close to them). Their current identification doesn't justify acting now. The script skips Phases 9–15 (close path) and swaps to Phase 16 (rebound + referrals).
 
 The next phase you see depends on which value you pick.
 ```
 
-This sub-section has no `[SAY]` block. It's rep-only guidance.
+This sub-section opens with one [SAY] block (visible to the prospect — makes the rep's evaluation moment explicit) followed by rep-only guidance.
 
 #### Step A.3 — (Obsolete — Doc is already correctly numbered)
 
@@ -149,17 +153,14 @@ This step was based on the deprecated v0.3 Doc which had a "Phase 1" mislabel at
 
 For each of these phases, add the marker as a STANDALONE LINE between the phase heading (`## Phase N — Title`) and the Goal line. Place it OUTSIDE any `[SAY]` block — it must be a plain line so Gemini's parser tags it as a note block.
 
-Phases to tag (10 total):
-- Phase 6 — Second close
-- Phase 7 — Solution: introduce desidentification
-- Phase 8 — Third close
+Phases to tag (7 total — only the close path; Phases 6–8 always show because they're the value-demo arc that runs for every prospect, qualified or not):
 - Phase 9 — Roadmap
 - Phase 10 — Eliminate perception of risk
 - Phase 11 — Price
 - Phase 12 — Close and next steps
 - Phase 13 — Handling the economic rebound
 - Phase 14 — Handling the alternatives rebound
-- Phase 15 — Handling the scientific evidence rebound (renumbered in A.3)
+- Phase 15 — Handling the scientific evidence rebound
 
 The line to add to each phase, immediately under its `##` heading:
 
@@ -279,13 +280,7 @@ With this:
 
 Why: sets the evaluation-direction from minute one. "Evaluar con vos" claims the rep's authority without medicalizing. "Tu caso" frames the prospect's situation as something we either take on or don't. "No todas las personas pasan al siguiente paso" lands the test without bragging or threatening. "Eso es parte del proceso" normalizes scarcity as routine.
 
-**(b) Phase 5c — insert a SAY block at the top (above the rep-only guidance added in Step A.2)**
-
-After the `### 5c. Re-classify fit after the desidentification demo` heading (from Step A.2), insert this SAY block BEFORE the existing ⚠️ Mandatory beat line:
-
-> *[SAY]Acabamos de hacer un ejercicio importante. Voy a tomarme un momento para evaluar si lo que hicimos hoy nos permite continuar el proceso con vos.[/SAY]*
-
-Why: makes the evaluation visible at the exact moment the rep is actually doing it. The rep then *literally pauses* — the silence IS the felt-scarcity. The verdict gets delivered by what phase plays next (Phase 6 if qualified via `fit_state`, Phase 16 if not).
+**(b) (Merged into Step A.2 — the scarcity SAY block at the top of the re-classify beat is now baked into the Phase 8.5 paste-in itself.)**
 
 **(c) Phase 11 — insert a SAY block at the very top (above the body-language warning)**
 
