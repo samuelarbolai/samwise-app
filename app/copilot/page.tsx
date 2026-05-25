@@ -129,8 +129,8 @@ export default function CopilotPage() {
       // prospect's session survives into this prospect's render. Without
       // this reset, only the variables in QUALIFICATION_TO_DEMO_FIELDS
       // would get overwritten; everything else (Phase 5 captures,
-      // self_destructive_behaviour, rep_notes, etc.) would keep the
-      // previous prospect's values from the restored localStorage state.
+      // rep_notes, etc.) would keep the previous prospect's values from
+      // the restored localStorage state.
       // ────────────────────────────────────────────────────────────────
       const fresh = makeEmptyState(DEMO_CALL_VARIABLES)
       // Preserve the qualification's prospectKey so the demoCalls doc

@@ -219,15 +219,6 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     cleanable: true,
     frameworkSemantics: "What the prospect explicitly said they expect from working with Samwise. Their own words where possible. First-person, preserve emotionally loaded language.",
   },
-  {
-    name: "self_destructive_behaviour",
-    label: "Self-destructive behaviour",
-    phase: 3,
-    meaning: "Their framing of the problem; often = behaviour_to_change.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "The prospect's OWN framing of the self-destructive behaviour — often the same content as behaviour_to_change but in their voice and with more texture. NOT a clinical diagnosis (the framework deliberately externalizes this as a pattern, not as the prospect's identity).",
-  },
 
   // ---- Phase 5 — Desidentification demo ----
   {
