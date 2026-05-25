@@ -102,6 +102,18 @@ export default function CopilotPage() {
     "alternatives_exhaustion_level",
   ]
 
+  // Derived prefills — a qualification field copied into a differently-named
+  // demo variable. Use when data captured upstream IS the data Phase N
+  // captures live, just under a different field name. Phase 5's
+  // actions_during_relapse: qualify's behaviour-grounding rule already
+  // confirmed a specific verbatim action with the prospect; we prefill
+  // here so the rep doesn't re-ask. The rep extends during the call if
+  // additional action-stretch surfaces (scroll → snack → another scroll).
+  const DERIVED_PREFILLS: Array<{
+    from: keyof QualificationDoc
+    to: string
+  }> = [{ from: "behaviour_to_change", to: "actions_during_relapse" }]
+
   const handleLoadQualification = async () => {
     const identifier = qualifyIdentifier.trim()
     if (!identifier || !script || !state) return
@@ -159,6 +171,25 @@ export default function CopilotPage() {
           // makeEmptyState. During the ~1.5s cleaning window the
           // script-pane fallback renders {{var_name}}, which is
           // readable and signals the cleaning-in-flight state.
+          cleaningTriggers.push({ variable, value })
+        }
+        filledCount++
+      }
+
+      for (const { from, to } of DERIVED_PREFILLS) {
+        const value = q[from]
+        if (typeof value !== "string" || !value.trim()) continue
+        const variable = DEMO_CALL_VARIABLES.find((v) => v.name === to)
+        if (!variable) continue
+        // Don't clobber a same-name prefill (defensive — currently no
+        // overlap exists, but the loops run independently).
+        if (fresh.raw[to]) continue
+
+        fresh.raw[to] = value
+        if (!variable.cleanable) {
+          fresh.cleaned[to] = value
+        } else {
+          fresh.cleaning[to] = true
           cleaningTriggers.push({ variable, value })
         }
         filledCount++
