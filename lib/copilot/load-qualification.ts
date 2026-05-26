@@ -29,6 +29,10 @@ export interface QualificationDoc {
 
   // Priority 2 — verbatim capture (only on the qualified path)
   behaviour_to_change?: string
+  /** Full grounded incident description (WHEN/WHERE/ACTIVITY/ACTION as a
+   * noun-phrase). Phase 5b Step 1 anchor in /copilot. Extracted post-call
+   * from the transcript — never live-committed during the conversation. */
+  behaviour_example?: string
   core_motivation?: string
   problem_duration_self_reported?: string
   life_stage_context?: string

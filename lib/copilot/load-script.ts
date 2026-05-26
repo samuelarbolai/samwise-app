@@ -16,6 +16,7 @@ export interface LoadedPhase {
 
 export interface LoadedScript {
   scriptType: "demo" | "onboarding" | "call_design" | "unknown"
+  version?: string
   phases: LoadedPhase[]
 }
 
@@ -36,6 +37,7 @@ interface RawPhase {
 
 interface RawLoadedScript {
   scriptType: LoadedScript["scriptType"]
+  version?: string
   phases: RawPhase[]
 }
 
@@ -67,5 +69,5 @@ export async function loadCallScript(
     }
     return { number: p.number, title: p.title, blocks: [] }
   })
-  return { scriptType: raw.scriptType, phases }
+  return { scriptType: raw.scriptType, version: raw.version, phases }
 }

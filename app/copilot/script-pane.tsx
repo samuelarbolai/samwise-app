@@ -7,6 +7,7 @@ import { DEMO_CALL_VARIABLES } from "./demo-call-config"
 interface ScriptPaneProps {
   phases: LoadedPhase[]
   cleaned: Record<string, string>
+  version?: string
 }
 
 function renderText(
@@ -193,7 +194,7 @@ function scrollVarsToFirstSubstitutedVar(phase: LoadedPhase) {
   scrollVarsToPhase(phase.number)
 }
 
-export function ScriptPane({ phases, cleaned }: ScriptPaneProps) {
+export function ScriptPane({ phases, cleaned, version }: ScriptPaneProps) {
   // Passive sync: as the rep scrolls the script pane, scroll the
   // variables pane to whichever phase header has just crossed into the
   // top of the viewport. One-way only (script → variables) so there is
@@ -230,6 +231,13 @@ export function ScriptPane({ phases, cleaned }: ScriptPaneProps) {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
+      {version && (
+        <div className="mb-4 flex justify-end">
+          <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            v{version}
+          </span>
+        </div>
+      )}
       {phases.map((p) => {
         const condition = parsePhaseCondition(p)
         if (condition && cleaned[condition.var] !== condition.value) {

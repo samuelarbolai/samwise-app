@@ -96,6 +96,7 @@ export default function CopilotPage() {
   const QUALIFICATION_TO_DEMO_FIELDS: Array<keyof QualificationDoc> = [
     "prospect_name",
     "behaviour_to_change",
+    "behaviour_example",
     "core_motivation",
     "alternatives_tried",
     "why_alternatives_failed",
@@ -367,7 +368,11 @@ export default function CopilotPage() {
         />
       </section>
       <section className="overflow-auto">
-        <ScriptPane phases={script.phases} cleaned={state.cleaned} />
+        <ScriptPane
+          phases={script.phases}
+          cleaned={state.cleaned}
+          version={script.version}
+        />
       </section>
     </main>
   )

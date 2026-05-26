@@ -143,10 +143,19 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     name: "behaviour_to_change",
     label: "Behaviour to change",
     phase: "pre-call",
-    meaning: "The specific behaviour (short label).",
+    meaning: "Short verb-phrase form of the behaviour. Used in Step 3 action re-anchor, Step 5 IFS reframe, Phase 1.5 reflection. For the full incident description (used in Step 1 anchor), see behaviour_example below.",
     inputKind: "text",
     cleanable: true,
-    frameworkSemantics: "The specific behaviour the prospect wants to change — grounded as an action+activity, NOT an abstract label. Qualify produces a SENTENCE encoding the verb+object and the activity it interrupted (e.g. 'Saqué el teléfono y abrí Twitter cuando me senté a prospectar en LinkedIn', 'Gritarle a mi hijo cuando llego cansado del trabajo'). PRESERVE that sentence form — Phase 5's desidentification work anchors on this exact moment, so collapsing it into an abstract label ('doomscrolling', 'procrastinación', 'incumplimiento') destroys the specificity downstream slots depend on. Adapt grammar to fit the script slot (a 'cuando {{behaviour_to_change}}' slot wants a past-tense clause; a 'tu {{behaviour_to_change}}' slot wants a noun phrase) but keep the action+activity content verbatim. NEVER substitute a clinical or abstract noun for the prospect's specific framing. Use core_motivation and life_stage_context ONLY to disambiguate ambiguous senses (e.g. 'defaulting' → 'salir con mujeres mediocres' not 'incumplimiento'), never to inject motivation content. If the rep typed only a short label and nothing more, return the label unchanged — don't fabricate context.",
+    frameworkSemantics: "The specific behaviour the prospect wants to change — a SHORT verb-phrase form (verb + object). Used in script slots like 'cuando {{behaviour_to_change}}' and 'Ese momento en que {{behaviour_to_change}}', so it MUST be a clause grammatical enough to substitute into those slots. Examples of GOOD outputs: 'sacaste el teléfono y abriste Twitter', 'le gritaste a tu hijo', 'comiste compulsivamente'. NEVER substitute a clinical or abstract noun for the prospect's specific framing. NEVER produce a label form ('doomscrolling', 'procrastinación'). NEVER produce the full incident description (WHEN/WHERE/ACTIVITY/ACTION as paragraphs) — that belongs to behaviour_example, a separate variable. Use core_motivation and life_stage_context ONLY to disambiguate ambiguous senses (e.g. 'defaulting' → 'salir con mujeres mediocres' not 'incumplimiento'), never to inject motivation content.",
+  },
+  {
+    name: "behaviour_example",
+    label: "Behaviour example (Step 1 anchor)",
+    phase: "pre-call",
+    meaning:
+      "The full grounded incident the prospect described in the Fit Assessment, with WHEN/WHERE/ACTIVITY/ACTION as a noun-phrase. Used as Phase 5b Step 1's moment-anchor: 'Volvamos a ese momento que ya me contaste — {{behaviour_example}}'. Prefilled from qualify; do NOT shorten. If empty, fall back to the Step 1 fallback line in the script.",
+    inputKind: "textarea",
+    cleanable: false,
   },
   {
     name: "core_motivation",
