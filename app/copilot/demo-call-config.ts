@@ -220,72 +220,102 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "What the prospect explicitly said they expect from working with Samwise. Their own words where possible. First-person, preserve emotionally loaded language.",
   },
 
-  // ---- Phase 5 — Desidentification demo ----
+  // ---- Phase 5 — Desidentification demo (9-step structure) ----
+  // Variable order matches the rep's encounter sequence during Phase 5b:
+  // Step 3 (action re-anchor, prefilled) → Step 4 (feelings) → Step 5
+  // (intention via IFS) → Step 6 (thoughts) → Step 7 (self-talk) → Step 8
+  // (view-of-life synthesis) → Step 9 (consequences) → end (rep assesses
+  // grado_de_identificacion). Steps 1-2 (qualify-anchor + sensory recreation)
+  // don't capture variables. See Phase 5b in the Demo script Doc for the
+  // full structure and per-step techniques.
   {
-    name: "thoughts_during_relapse",
-    label: "Thoughts during relapse",
+    name: "actions_during_relapse",
+    label: "Step 3 — Action (prefilled)",
     phase: 5,
-    meaning: "Thoughts during relapse.",
+    meaning:
+      "Prefilled from qualify (the action component of {{behaviour_to_change}}). Used as the Step 3 action re-anchor. Extend only if additional action-stretch surfaces during the call.",
     inputKind: "textarea",
     cleanable: true,
-    frameworkSemantics: "The thoughts the prospect described having DURING a relapse. Quote or paraphrase in their voice and language. First-person where the script slot demands.",
+    frameworkSemantics:
+      "Concrete actions/behaviours the prospect engages in during a relapse. Examples: 'scrolling 2+ hours, skipping work', 'comer compulsivamente'.",
   },
   {
     name: "feelings_during_relapse",
-    label: "Feelings during relapse",
+    label: "Step 4 — Feelings",
     phase: 5,
-    meaning: "Feelings during relapse.",
+    meaning:
+      "Somatic content; first internal-state question after sensory recreation. If stalls, switch to body-location ('¿pecho cerrado, estómago apretado, nada de nada?').",
     inputKind: "textarea",
     cleanable: true,
-    frameworkSemantics: "Emotional states the prospect described feeling during a relapse. Their words: 'me siento cochina', 'numb', 'overwhelmed', etc.",
-  },
-  {
-    name: "actions_during_relapse",
-    label: "Actions during relapse",
-    phase: 5,
-    meaning: "What they do during relapse.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "Concrete actions/behaviours the prospect engages in during a relapse. Examples: 'scrolling 2+ hours, skipping work', 'comer compulsivamente'.",
+    frameworkSemantics:
+      "Emotional states the prospect described feeling during a relapse. Their words: 'me siento cochina', 'numb', 'overwhelmed', etc.",
   },
   {
     name: "intention_behind_action",
-    label: "Intention behind action",
+    label: "Step 5 — Intention (IFS reframe)",
     phase: 5,
-    meaning: "Intention behind the action.",
+    meaning:
+      "Via the IFS reframe — what the part was trying to do for them. NEVER ask the direct '¿qué buscabas?' version. Creates desidentification distance early in the phase.",
     inputKind: "textarea",
     cleanable: true,
-    frameworkSemantics: "What the prospect was unconsciously seeking when the relapse happened. Examples: 'escape stress', 'feel needed', 'avoid feeling stupid'. Short noun phrase or short clause.",
+    frameworkSemantics:
+      "What the prospect was unconsciously seeking when the relapse happened. Examples: 'escape stress', 'feel needed', 'avoid feeling stupid'. Short noun phrase or short clause.",
+  },
+  {
+    name: "thoughts_during_relapse",
+    label: "Step 6 — Thoughts",
+    phase: 5,
+    meaning:
+      "What was going through their head in the moment. If stalls, propose two deliberately opposed options (one minimizing, one self-permissive) plus an escape hatch.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics:
+      "The thoughts the prospect described having DURING a relapse. Quote or paraphrase in their voice and language. First-person where the script slot demands.",
   },
   {
     name: "self_talk_after_relapse",
-    label: "Self-talk after relapse",
+    label: "Step 7 — Self-talk after",
     phase: 5,
-    meaning: "Self-talk after relapse — verbatim.",
+    meaning:
+      "VERBATIM quote of what they told themselves AFTER. Write exactly what they said, in their language. Do not clean up.",
     inputKind: "textarea",
     cleanable: true,
     verbatim: true,
-    frameworkSemantics: "VERBATIM quote of what the prospect tells themselves after relapsing. The script literally quotes this back to them — preserve their exact wording in their original language. Fix only obvious typos and trim filler. NEVER paraphrase, translate, or summarize. Output as a direct quote without surrounding quote marks (the script provides those).",
-  },
-  {
-    name: "consequences_for_them",
-    label: "Consequences for them",
-    phase: 5,
-    meaning: "Consequences for their life.",
-    inputKind: "textarea",
-    cleanable: true,
-    frameworkSemantics: "Real-life consequences of the behaviour for the prospect — relationships, work, health, dignity, missed deadlines, etc. In their voice, first-person where it fits.",
+    frameworkSemantics:
+      "VERBATIM quote of what the prospect tells themselves after relapsing. The script literally quotes this back to them — preserve their exact wording in their original language. Fix only obvious typos and trim filler. NEVER paraphrase, translate, or summarize. Output as a direct quote without surrounding quote marks (the script provides those).",
   },
   {
     name: "view_of_their_life_in_that_moment",
-    label: "View of their life",
+    label: "Step 8 — View of life (PEAK)",
     phase: 5,
-    meaning: "How they see life in that moment.",
+    meaning:
+      "PEAK of the phase. Captured as the prospect's CORRECTION of the rep's synthesis offer, not as a direct answer. A precise correction = high identification.",
     inputKind: "textarea",
     cleanable: true,
-    frameworkSemantics: "How the prospect sees their life or themselves in the moment of relapse. Often dark, defeated, despairing. First-person. Preserve emotional charge — do not soften.",
+    frameworkSemantics:
+      "How the prospect sees their life or themselves in the moment of relapse. Often dark, defeated, despairing. First-person. Preserve emotional charge — do not soften.",
   },
-  { name: "grado_de_identificacion",   label: "Identification level",     phase: 5, meaning: "Rep's read on identification level.", inputKind: "select", options: ["low","medium","high"], cleanable: false },
+  {
+    name: "consequences_for_them",
+    label: "Step 9 — Consequences",
+    phase: 5,
+    meaning:
+      "Zoom out from the moment to the cost in their life. If stalls, push into trajectory ('si esto sigue seis meses más, ¿dónde estás?'). Bridge to Phase 6.",
+    inputKind: "textarea",
+    cleanable: true,
+    frameworkSemantics:
+      "Real-life consequences of the behaviour for the prospect — relationships, work, health, dignity, missed deadlines, etc. In their voice, first-person where it fits.",
+  },
+  {
+    name: "grado_de_identificacion",
+    label: "End of 5b — Identification level",
+    phase: 5,
+    meaning:
+      "Your assessment after the full 9-step phase. Best single read: quality of the prospect's correction at Step 8 (precise alternative = high; bland acceptance = low).",
+    inputKind: "select",
+    options: ["low", "medium", "high"],
+    cleanable: false,
+  },
 
   // ---- Phase 7 — Solution intro ----
   { name: "biologic_symbolic_analogy", label: "Biologic/symbolic analogy", phase: 7, meaning: "Analogy chosen for them.", inputKind: "select", options: ["flu","cold","allergy","diabetes","cancer","other"], cleanable: false },
