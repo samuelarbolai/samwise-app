@@ -20,11 +20,17 @@ import {
 } from "@/components/ui/select"
 import {
   type SessionState,
+  type SuggestionEntry,
   saveSessionState,
   clearSessionState,
 } from "@/lib/copilot/session-storage"
 import { cleanVariableDebounced } from "@/lib/copilot/clean-variable"
 import { appendDemoCallRow } from "@/lib/copilot/append-row"
+import {
+  firePreGeneration,
+  generateSuggestionFor,
+  type SuggestionUpdater,
+} from "@/lib/copilot/suggest-rep-line"
 import type { LoadedScript } from "@/lib/copilot/load-script"
 
 interface VariablesTableProps {
@@ -58,6 +64,27 @@ export function VariablesTable({
     saveSessionState({ docUrl, script, state })
   }, [state, docUrl, script])
 
+  // Suggestion state updater — used by both pre-generation trigger fires
+  // and manual "Sugerir/Regenerar" button clicks. Closes over setState.
+  const updateSuggestion: SuggestionUpdater = (varName, update) => {
+    setState(
+      (prev) =>
+        prev && {
+          ...prev,
+          suggestions: {
+            ...prev.suggestions,
+            [varName]: {
+              ...(prev.suggestions[varName] ?? {
+                line: "",
+                generating: false,
+              }),
+              ...update,
+            },
+          },
+        },
+    )
+  }
+
   const setRaw = (name: string, raw: string) => {
     setState(
       (prev) => prev && { ...prev, raw: { ...prev.raw, [name]: raw } },
@@ -69,6 +96,18 @@ export function VariablesTable({
         (prev) =>
           prev && { ...prev, cleaned: { ...prev.cleaned, [name]: raw } },
       )
+      // Trigger any suggestion that depends on THIS variable's capture.
+      // For non-cleanable vars, fire immediately on raw set.
+      if (raw && raw.trim()) {
+        // Snapshot the latest state (the setState above is async; we
+        // use the value we just computed as the trigger context).
+        const stateForTrigger = {
+          ...state,
+          raw: { ...state.raw, [name]: raw },
+          cleaned: { ...state.cleaned, [name]: raw },
+        }
+        firePreGeneration(name, variables, stateForTrigger, updateSuggestion)
+      }
       return
     }
     setState(
@@ -96,6 +135,15 @@ export function VariablesTable({
             cleaning: { ...prev.cleaning, [name]: false },
           },
       )
+      // Cleaning completed — NOW fire any downstream suggestion that
+      // depends on this variable's capture. Using the cleaned value as
+      // input means suggestions get the highest-fidelity context.
+      const stateForTrigger = {
+        ...state,
+        raw: { ...state.raw, [name]: raw },
+        cleaned: { ...state.cleaned, [name]: cleaned },
+      }
+      firePreGeneration(name, variables, stateForTrigger, updateSuggestion)
     })
   }
 
@@ -175,8 +223,12 @@ export function VariablesTable({
                 rawValue={state.raw[v.name] ?? ""}
                 cleanedValue={state.cleaned[v.name] ?? ""}
                 isCleaning={!!state.cleaning[v.name]}
+                suggestion={state.suggestions?.[v.name]}
                 onRawChange={(val) => setRaw(v.name, val)}
                 onCleanedChange={(val) => setCleanedManual(v.name, val)}
+                onGenerateSuggestion={() =>
+                  generateSuggestionFor(v, state, updateSuggestion)
+                }
               />
             ))}
           </div>
@@ -194,8 +246,10 @@ interface VariableRowProps {
   rawValue: string
   cleanedValue: string
   isCleaning: boolean
+  suggestion?: SuggestionEntry
   onRawChange: (v: string) => void
   onCleanedChange: (v: string) => void
+  onGenerateSuggestion: () => void
 }
 
 function VariableRow({
@@ -203,8 +257,10 @@ function VariableRow({
   rawValue,
   cleanedValue,
   isCleaning,
+  suggestion,
   onRawChange,
   onCleanedChange,
+  onGenerateSuggestion,
 }: VariableRowProps) {
   const v = variable
   return (
@@ -219,57 +275,149 @@ function VariableRow({
       </div>
       <p className="text-xs text-muted-foreground mb-2">{v.meaning}</p>
 
-      {v.inputKind === "select" ? (
-        <Select value={rawValue} onValueChange={onRawChange}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select…" />
-          </SelectTrigger>
-          <SelectContent>
-            {v.options!.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : v.inputKind === "textarea" ? (
-        <Textarea
-          value={rawValue}
-          onChange={(e) => onRawChange(e.target.value)}
-          rows={3}
-          placeholder="Raw note (type freely; will be cleaned)…"
-        />
-      ) : (
-        <Input
-          type={
-            v.inputKind === "number"
-              ? "number"
-              : v.inputKind === "date"
-                ? "date"
-                : "text"
-          }
-          value={rawValue}
-          onChange={(e) => onRawChange(e.target.value)}
-          placeholder="Raw note…"
+      {/* Suggestion panel — renders only if the variable has a
+          suggestTechnique. Goes ABOVE the raw input so the rep reads
+          the suggested SAY line before/while capturing the prospect's
+          response. */}
+      {v.suggestTechnique && (
+        <SuggestionPanel
+          entry={suggestion}
+          onGenerate={onGenerateSuggestion}
         />
       )}
 
-      {v.cleanable && (
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground min-w-[60px]">Cleaned:</span>
-          {isCleaning ? (
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <Spinner className="h-3 w-3" /> cleaning…
-            </span>
+      {/* Skip raw/cleaned inputs entirely for rep-helper-only variables
+          (e.g. Phase 1.5 worldview_confirmation_line — there's no
+          prospect-side data to capture here, just a line the rep
+          reads). */}
+      {!v.repHelperOnly && (
+        <>
+          {v.inputKind === "select" ? (
+            <Select value={rawValue} onValueChange={onRawChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {v.options!.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : v.inputKind === "textarea" ? (
+            <Textarea
+              value={rawValue}
+              onChange={(e) => onRawChange(e.target.value)}
+              rows={3}
+              placeholder="Raw note (type freely; will be cleaned)…"
+            />
           ) : (
-            <input
-              className="flex-1 bg-transparent border-b border-dashed border-muted-foreground/30 focus:outline-none focus:border-primary"
-              value={cleanedValue}
-              onChange={(e) => onCleanedChange(e.target.value)}
-              placeholder={rawValue ? "(awaiting cleaning…)" : ""}
+            <Input
+              type={
+                v.inputKind === "number"
+                  ? "number"
+                  : v.inputKind === "date"
+                    ? "date"
+                    : "text"
+              }
+              value={rawValue}
+              onChange={(e) => onRawChange(e.target.value)}
+              placeholder="Raw note…"
             />
           )}
+
+          {v.cleanable && (
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground min-w-[60px]">
+                Cleaned:
+              </span>
+              {isCleaning ? (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Spinner className="h-3 w-3" /> cleaning…
+                </span>
+              ) : (
+                <input
+                  className="flex-1 bg-transparent border-b border-dashed border-muted-foreground/30 focus:outline-none focus:border-primary"
+                  value={cleanedValue}
+                  onChange={(e) => onCleanedChange(e.target.value)}
+                  placeholder={rawValue ? "(awaiting cleaning…)" : ""}
+                />
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+interface SuggestionPanelProps {
+  entry: SuggestionEntry | undefined
+  onGenerate: () => void
+}
+
+/**
+ * Renders the LLM-generated SAY line for variables with a
+ * suggestTechnique. Three states:
+ *  - generating: spinner + "Generando..."
+ *  - line present: italic line in a tinted card + ↻ regenerate button
+ *  - no line yet (or empty): "💡 Sugerir línea" button (+ inline error
+ *    if the last attempt failed)
+ *
+ * The suggestion is meant to be READ ALOUD by the rep, possibly with
+ * small adaptations to their register — it's a suggested SAY line, not
+ * data to type into the variable.
+ */
+function SuggestionPanel({ entry, onGenerate }: SuggestionPanelProps) {
+  const e = entry ?? { line: "", generating: false }
+  const hasLine = !!e.line && !!e.line.trim()
+
+  if (e.generating) {
+    return (
+      <div className="mb-3 rounded-md border border-dashed bg-muted/30 p-2.5 text-xs text-muted-foreground flex items-center gap-2">
+        <Spinner className="h-3 w-3" />
+        Generando línea sugerida…
+      </div>
+    )
+  }
+
+  if (hasLine) {
+    return (
+      <div className="mb-3 rounded-md border border-amber-200 bg-amber-50/50 dark:border-amber-900/50 dark:bg-amber-950/20 p-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs italic flex-1 leading-relaxed">
+            <span className="not-italic mr-1">💡</span>
+            {e.line}
+          </p>
+          <button
+            type="button"
+            onClick={onGenerate}
+            className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground shrink-0"
+            title="Generar otra sugerencia"
+          >
+            ↻
+          </button>
         </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onGenerate}
+        className="h-7 text-xs"
+      >
+        💡 Sugerir línea
+      </Button>
+      {e.error && (
+        <span className="text-[11px] text-red-600 dark:text-red-400">
+          {e.error}
+        </span>
       )}
     </div>
   )

@@ -31,6 +31,10 @@ import {
   type SessionState,
   makeEmptyState,
 } from "@/lib/copilot/session-storage"
+import {
+  firePreGeneration,
+  type SuggestionUpdater,
+} from "@/lib/copilot/suggest-rep-line"
 import { VariablesTable } from "./variables-table"
 import { ScriptPane } from "./script-pane"
 
@@ -196,6 +200,35 @@ export default function CopilotPage() {
       }
 
       setState(fresh)
+
+      // Fire suggestion pre-generation for any variable whose trigger
+      // is "qualification_load" (currently only Phase 1.5 worldview
+      // confirmation). Uses the fresh state so the generator sees all
+      // qualification values immediately, not the previous prospect's.
+      const updateSuggestion: SuggestionUpdater = (varName, update) => {
+        setState(
+          (prev) =>
+            prev && {
+              ...prev,
+              suggestions: {
+                ...prev.suggestions,
+                [varName]: {
+                  ...(prev.suggestions[varName] ?? {
+                    line: "",
+                    generating: false,
+                  }),
+                  ...update,
+                },
+              },
+            },
+        )
+      }
+      firePreGeneration(
+        "qualification_load",
+        DEMO_CALL_VARIABLES,
+        fresh,
+        updateSuggestion,
+      )
 
       for (const { variable, value } of cleaningTriggers) {
         cleanVariableDebounced(

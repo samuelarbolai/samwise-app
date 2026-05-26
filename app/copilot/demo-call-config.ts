@@ -58,6 +58,28 @@ export interface DemoCallVariable {
    * created. Used by phase-condition variables (e.g. fit_state) so the
    * default branch of the script is visible before the rep touches anything. */
   defaultValue?: string
+  /** If set, this variable surfaces a "Sugerir línea" button in /copilot
+   * that displays an LLM-generated SAY line tuned to the prospect. The
+   * technique determines the prompt the suggestRepLine cloud function
+   * uses. Suggestions pre-generate in the background when the trigger
+   * fires (see suggestTriggerVariable). */
+  suggestTechnique?:
+    | "phase_1_5_worldview_confirmation"
+    | "ifs_reframe"
+    | "amplification_two_poles"
+    | "synthesis_offer"
+    | "trajectory_push"
+  /** The name of a captured variable whose completion triggers pre-
+   * generation of THIS variable's suggestion. Special value
+   * "qualification_load" triggers generation immediately when a
+   * qualification doc loads. If unset, the suggestion only generates
+   * on-demand when the rep clicks the button. */
+  suggestTriggerVariable?: string
+  /** Rep-helper-only variables don't have a raw/cleaned capture flow —
+   * they exist purely to host an LLM-generated SAY line the rep weaves
+   * into a spoken phase. Used for the Phase 1.5 worldview confirmation
+   * helper. UI renders only the suggestion panel; no raw input box. */
+  repHelperOnly?: boolean
 }
 
 // Pre-filled default Doc URL — the canonical Demo script.
@@ -199,6 +221,22 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     options: ["low", "medium", "high"],
     cleanable: false,
   },
+  // Phase 1.5 worldview-confirmation helper. Rep-helper-only — no
+  // capture, just an LLM-generated SAY line the rep weaves into Phase
+  // 1.5's reflection. Generated immediately on qualification load so
+  // it's ready by the time the call starts.
+  {
+    name: "worldview_confirmation_line",
+    label: "Phase 1.5 — Worldview confirmation",
+    phase: "pre-call",
+    meaning:
+      "LLM-generated one-line worldview reflection for Phase 1.5. Read it aloud or adapt to your voice; signals to the prospect you heard their register, not just their facts. Empty if no symbolic anchor is on file.",
+    inputKind: "textarea",
+    cleanable: false,
+    repHelperOnly: true,
+    suggestTechnique: "phase_1_5_worldview_confirmation",
+    suggestTriggerVariable: "qualification_load",
+  },
 
   // ---- Phase 3 — Bond ----
   {
@@ -260,51 +298,61 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     cleanable: true,
     frameworkSemantics:
       "What the prospect was unconsciously seeking when the relapse happened. Examples: 'escape stress', 'feel needed', 'avoid feeling stupid'. Short noun phrase or short clause.",
+    suggestTechnique: "ifs_reframe",
+    suggestTriggerVariable: "feelings_during_relapse",
   },
   {
     name: "thoughts_during_relapse",
     label: "Step 6 — Thoughts",
     phase: 5,
     meaning:
-      "What was going through their head in the moment. If stalls, propose two deliberately opposed options (one minimizing, one self-permissive) plus an escape hatch.",
+      "What was going through their head. LLM-suggested amplification (two opposing options) is the DEFAULT opener for this step — direct ask is the fallback if the amplification doesn't land.",
     inputKind: "textarea",
     cleanable: true,
     frameworkSemantics:
       "The thoughts the prospect described having DURING a relapse. Quote or paraphrase in their voice and language. First-person where the script slot demands.",
+    suggestTechnique: "amplification_two_poles",
+    suggestTriggerVariable: "intention_behind_action",
   },
   {
     name: "self_talk_after_relapse",
     label: "Step 7 — Self-talk after",
     phase: 5,
     meaning:
-      "VERBATIM quote of what they told themselves AFTER. Write exactly what they said, in their language. Do not clean up.",
+      "VERBATIM quote of what they told themselves AFTER. LLM-suggested amplification (two opposing options) is the DEFAULT opener for this step — direct ask is the fallback. Write the prospect's correction verbatim in their language.",
     inputKind: "textarea",
     cleanable: true,
     verbatim: true,
     frameworkSemantics:
       "VERBATIM quote of what the prospect tells themselves after relapsing. The script literally quotes this back to them — preserve their exact wording in their original language. Fix only obvious typos and trim filler. NEVER paraphrase, translate, or summarize. Output as a direct quote without surrounding quote marks (the script provides those).",
+    suggestTechnique: "amplification_two_poles",
+    suggestTriggerVariable: "thoughts_during_relapse",
   },
   {
     name: "view_of_their_life_in_that_moment",
     label: "Step 8 — View of life (PEAK)",
     phase: 5,
     meaning:
-      "PEAK of the phase. Captured as the prospect's CORRECTION of the rep's synthesis offer, not as a direct answer. A precise correction = high identification.",
+      "PEAK of the phase. Captured as the prospect's CORRECTION of the rep's synthesis offer (LLM-generated), not as a direct answer. A precise correction = high identification.",
     inputKind: "textarea",
     cleanable: true,
     frameworkSemantics:
       "How the prospect sees their life or themselves in the moment of relapse. Often dark, defeated, despairing. First-person. Preserve emotional charge — do not soften.",
+    suggestTechnique: "synthesis_offer",
+    suggestTriggerVariable: "self_talk_after_relapse",
   },
   {
     name: "consequences_for_them",
     label: "Step 9 — Consequences",
     phase: 5,
     meaning:
-      "Zoom out from the moment to the cost in their life. If stalls, push into trajectory ('si esto sigue seis meses más, ¿dónde estás?'). Bridge to Phase 6.",
+      "Zoom out from the moment to the cost in their life. Direct ask first; LLM-suggested trajectory-push is the fallback if the prospect minimizes ('tampoco es para tanto'). Bridge to Phase 6.",
     inputKind: "textarea",
     cleanable: true,
     frameworkSemantics:
       "Real-life consequences of the behaviour for the prospect — relationships, work, health, dignity, missed deadlines, etc. In their voice, first-person where it fits.",
+    suggestTechnique: "trajectory_push",
+    suggestTriggerVariable: "view_of_their_life_in_that_moment",
   },
   {
     name: "grado_de_identificacion",
