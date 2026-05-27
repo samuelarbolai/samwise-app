@@ -1274,6 +1274,161 @@ Helper lives in samwise-app's API route (not in cloud-functions — samwise-app 
 - Email arrives at `samuelgiraldoconcha@gmail.com` within ~30s.
 - Click the email link → `localhost:3000/meet/<id>` opens, copilot loads, video joins same room as the lobby tab.
 
+---
+
+## Phase 12 — Custom booking picker against Google Calendar (replaces Cal entirely)
+
+Cal kept fighting us. Pivot: drop Cal entirely. `/book` becomes a Samwise-styled picker that reads Samuel's calendar availability from Google Calendar API and writes bookings back to it. Prospect never sees cal.com again.
+
+### Architecture
+
+```
+samwise.life/book
+  └─ month grid (clickable days, only available days highlighted)
+     └─ click day → time-slots list (50-min slots, 30-min granularity)
+        └─ click slot → name + email form
+           └─ submit → POST app.samwise.life/api/book/create
+                        ├─ Google Calendar events.insert (Samuel's calendar)
+                        ├─ writes calendarBookings/{calEventId} to Firestore
+                        ├─ writes mail/{auto-id} → Samwise-branded confirmation
+                        │   with link app.samwise.life/meet/{calEventId}
+                        └─ returns { calEventId, scheduledFor }
+           └─ confirmation view ("You're set. We sent the link to your inbox.")
+```
+
+Booking discovery on day click:
+```
+samwise.life/book mount
+  └─ GET app.samwise.life/api/book/slots?from=...&to=...
+        └─ Google Calendar freebusy.query (Samuel's calendar)
+        └─ subtract busy times from working-hours window
+        └─ returns array of { day: "2026-05-28", slots: ["10:00","10:30",...] }
+```
+
+### Defaults (per user 2026-05-27)
+
+| | |
+|---|---|
+| Calendar | `samuelgiraldoconcha@gmail.com` (personal) |
+| Slot duration | 50 min |
+| Working hours | Mon–Fri 6:00 am – 6:30 pm America/Bogota |
+| Slot granularity | every 30 min |
+| Min notice | 24 hours from now |
+| Max days out | 14 |
+| Meeting name | "Samwise Breakthrough Call" |
+
+### Files
+
+```
+samwise-app/
+├── lib/google-calendar.ts          # NEW — JWT→access-token + freebusy + events.insert
+├── lib/book/availability.ts        # NEW — slot computation: window − busy = available
+├── lib/book/booking.ts             # NEW — calendarBookings/{id} reader/writer
+├── app/api/book/slots/route.ts     # NEW — GET, returns 14-day availability map
+└── app/api/book/create/route.ts    # NEW — POST, books slot + writes Firestore + mail
+
+samwise-landing/
+└── app/book/
+    ├── page.tsx                    # MODIFIED — drops Cal embed, renders BookRoot
+    ├── book-root.tsx               # NEW — state machine: month → slots → confirm → done
+    ├── month-grid.tsx              # NEW — 6×7 CSS grid, hairline gold ring on selected
+    ├── time-slots.tsx              # NEW — vertical list of Fraunces-italic time buttons
+    ├── confirm.tsx                 # NEW — name + email + hairline-gold-dash CTA
+    ├── done.tsx                    # NEW — "You're set." confirmation
+    ├── book-client.tsx             # DELETED — Cal embed removed
+    └── book.css                    # REWRITTEN for picker, drops Cal modal CTA
+```
+
+### Step 12.0 — Manual setup (Samuel does)
+
+1. **Enable Calendar API** in GCP: console.cloud.google.com → arbor-2026 → APIs & Services → Library → Google Calendar API → Enable.
+2. **Find service account email** from FIREBASE_SERVICE_ACCOUNT JSON (the `client_email` field — typically `firebase-adminsdk-XXXX@arbor-2026.iam.gserviceaccount.com`).
+3. **Share personal calendar** with that email: calendar.google.com → settings cog → Settings → Settings for my calendars → samuelgiraldoconcha@gmail.com → Share with specific people → Add the service account email → permission: **"Make changes to events"**.
+4. **Add Vercel env var on samwise-app** (Production + Preview): `BOOKING_CALENDAR_ID=samuelgiraldoconcha@gmail.com`. Already-present `FIREBASE_SERVICE_ACCOUNT` is reused — no new credential.
+
+### Step 12.1 — `lib/google-calendar.ts`
+
+Minimal helpers using service-account JWT bearer-token flow (no `googleapis` SDK — saves ~100MB). Lazy-singleton access token (cached for ~50min, refreshed on expiry). Two exposed functions: `freebusy({calendarId, timeMin, timeMax, timeZone})` and `insertEvent({calendarId, summary, description, start, end, attendees, timeZone})`. Add `google-auth-library` as a direct dep (~1MB) for JWT signing.
+
+### Step 12.2 — `lib/book/availability.ts`
+
+Pure function. Given a window and busy-intervals, returns `[{day, slots}]` where each slot is `"HH:mm"` start time. Honors:
+- Working hours 6:00–18:30 America/Bogota
+- Mon–Fri only
+- 24h minimum notice from now
+- 50-min duration → a slot at HH:mm only fits if [HH:mm, HH:mm+50min] has no busy overlap
+- 30-min granularity
+
+### Step 12.3 — `app/api/book/slots/route.ts`
+
+`GET /api/book/slots?from=ISO&to=ISO` (defaults: now+24h → now+14d). Returns `{ days: [{day: "YYYY-MM-DD", slots: ["06:00","06:30",...]}] }`. CORS-open to samwise.life. `runtime = 'nodejs'`.
+
+### Step 12.4 — `app/api/book/create/route.ts`
+
+`POST /api/book/create` body `{ slotISO, name, email, language }`. Returns `{ calEventId, scheduledFor, joinUrl }`. Server-side:
+1. Re-verify slot is still free (freebusy query → reject 409 if booked)
+2. `events.insert` on Samuel's calendar — summary="Samwise Breakthrough Call", description includes meet URL, attendee={name,email}, sendUpdates="all" (Google sends invite email automatically — Samwise email is in addition for branding)
+3. Write `calendarBookings/{calEventId}` to Firestore (same shape as demoBookings/walkIns: roomName, prospectKey, prospect, language, scheduledFor)
+4. Write `mail/{auto-id}` → Samwise-branded confirmation with `https://samwise.life/meet/{calEventId}`
+5. Return
+
+### Step 12.5 — `samwise-landing/app/book/*` from-scratch picker
+
+Per the samwise-landing-page skill register. Specs:
+- **Month grid**: 6×7 CSS grid. Day cells are 56px buttons. Cells with `slots.length > 0` get full opacity + cursor pointer; cells without get 0.25 opacity + no pointer. Selected cell gets a hairline gold ring (`box-shadow: inset 0 0 0 1px #D4A85A`). Month label is Fraunces italic 24px. Weekday headers are Manrope small-caps 11px / 0.22em.
+- **Time slots**: vertical stack of buttons. Each button is `[—] HH:mm [—]` in the qualify CTA register (hairline gold dashes flanking Fraunces italic time). Click → transition to confirm.
+- **Confirm form**: name (Fraunces italic input, centered hairline underline) + email (Manrope, smaller, same underline) + gold-dash CTA "Confirm" / "Confirmar".
+- **Done view**: Fraunces italic lead *"You're set."* / *"Estás dentro."* + sub *"We sent the link to your inbox."* / *"Te enviamos el link por correo."* + a small "Back to Samwise" link.
+- **Bilingual** via `?lang=es` query param (same convention as `/book` Cal version).
+
+### Step 12.6 — Cleanup
+
+Once Phase 12 ships and works, delete:
+- `samwise-backend/cloud-functions/functions/src/index.ts` → `calDemoBookingWebhook` function (deploy `firebase deploy --only functions` after removing)
+- `samwise-app/app/api/demo-call/init/route.ts`, `samwise-app/components/demo-call/`, `samwise-app/app/demo-call/`
+- `samwise-app/lib/demo-call/booking.ts`
+- `samwise-landing/app/demo-call/`
+
+Reuses kept: `samwise-app/lib/demo-call/broadcast.ts` (still used by walk-in side via the broadcaster pattern); `samwise-app/components/demo-call/VideoCallExperience.tsx` (still imported by WalkInShell). Or rename `demo-call` → `call` since "demo" is the dead naming now.
+
+---
+
+## Phase 13 — `/meet` quick fixes (free-to-enter + editorial redesign)
+
+Two coupled changes the user surfaced after first test. Small, independent of Phase 12.
+
+### Step 13.1 — Free-to-enter `/meet` lobby
+
+`samwise-landing/app/meet/lobby.tsx`:
+- Name and email both optional (no validation gate)
+- Single "Enter" CTA always enabled (was: disabled until name+email valid)
+- On submit with blank fields: pass `name = "Guest"`, `email = ""` to the init route
+- samwise-app `/api/walk-in/init`: tolerate blank email — fall back to prospectKey `guest-{Date.now()}`, skip email collection from the prospectKey chain
+
+### Step 13.2 — `/meet` in-call layout — editorial redesign
+
+Replace the "two halves with a divider" layout with the Samwise editorial register.
+
+Current: 2-column grid `1.8fr 1fr`, hard `border-l` between, video edge-to-edge in its column, dark `.demo-call-controls` bar at bottom.
+
+New (`call-room.tsx` + `meet.css` reuse + override):
+- **Background**: gallery white the whole way around (not the dark video filling the page).
+- **Video tile**: contained, max-width 720px, ~16/9 ratio, ~32px margin from page edges, rounded 6px corners, soft shadow `0 24px 64px -16px rgba(0,0,0,0.18)`. Centered-left on desktop.
+- **Self-view PiP**: smaller (120×90px), bottom-right INSIDE the video tile, 6px border-radius, 1px ink-mute border.
+- **Notes column**: right of the video tile, no border, no panel background. Vertical stack of `.qualify-notes-card`s in their existing register (Manrope small-caps label + Fraunces italic quote on white). Wider air between cards (~36px gap). Max-width 28em.
+- **Controls**: small Manrope-small-caps text buttons in a row below the video tile (`[Mute] [Camera off] [End call]`). No black bar. Hover: ink underline expands from center. End-call gets a hairline red tint instead of red fill.
+- **Mobile**: video tile stacks above notes; same air, same containment, no border. Controls below video.
+
+Files touched:
+- `samwise-landing/app/demo-call/[bookingId]/demo-call.css` — rewrite `.demo-call-room`, `.demo-call-room-video`, `.demo-call-room-notes`, `.demo-call-video`, `.demo-call-video-self`, `.demo-call-controls`, `.demo-call-control-btn`
+- `samwise-landing/app/demo-call/[bookingId]/video-call-experience.tsx` — minor: move self-view from `position: absolute right:16 top:16` (page-corner) to inside the video tile
+
+### Testing
+
+- Open `localhost:3001/meet` → lobby allows direct "Enter" with empty fields.
+- After joining, layout is editorial: white background, contained video tile, no border between video and notes, soft shadow on the tile, controls as text buttons below.
+- Resize to 600px wide → video stacks above notes, no horizontal scroll, controls still readable.
+
 ### Testing
 
 - Open `localhost:3001/book` → CTA visible, click → Cal modal opens with the `demo` event type.

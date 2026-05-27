@@ -10,23 +10,39 @@ import {
   notifySamuelOfWalkIn,
   readWalkIn,
 } from '@/lib/walk-in/walkin';
+import { readCalendarBooking } from '@/lib/book/booking';
 
 export const runtime = 'nodejs';
 
 // Two shapes:
 //  - { mode: "create", name, email, language }            ← from the lobby
 //  - { mode: "join_existing", walkInId, side: "therapist" } ← Samuel's surface
+//
+// email is optional in the create path (per user 2026-05-27 — "make the
+// room free to enter"). If supplied, must be valid format. If blank,
+// prospectKey falls back to a guest identifier and notification email
+// is skipped.
 const RequestSchema = z.union([
   z.object({
     mode: z.literal('create'),
     name: z.string().min(1).max(120),
-    email: z.string().email().max(200),
+    email: z.union([z.string().email().max(200), z.literal('')]),
     language: z.enum(['en', 'es']),
   }),
   z.object({
     mode: z.literal('join_existing'),
+    // Despite the name, this id can resolve against EITHER walkIns
+    // (for walk-in entries from /meet lobby) OR calendarBookings (for
+    // scheduled bookings from /book). The route tries calendarBookings
+    // first, falls back to walkIns. Format conventions differ enough
+    // that collisions are impossible.
     walkInId: z.string().min(1),
-    side: z.enum(['therapist']),
+    // Therapist = Samuel joining from the email/calendar invite link;
+    // user = the prospect joining from their email link at call time.
+    // Walk-ins only support side="therapist" historically (the user
+    // goes straight into the room from the lobby) — but a user-side
+    // call against a walk-in id still mints a guest token cleanly.
+    side: z.enum(['therapist', 'user']),
   }),
 ]);
 
@@ -81,8 +97,14 @@ export async function POST(req: Request) {
   // a token, notify Samuel, return everything the lobby needs to
   // immediately transition into the call.
   if (data.mode === 'create') {
-    const prospectKey = emailToProspectKey(data.email);
     const ts = Date.now();
+    // Blank email → guest identity. Used for testing + walk-ins where
+    // the prospect didn't bother entering an email. prospectKey still
+    // exists so the doc has a key + lookups don't crash, it just won't
+    // match any existing qualification (no pre-fill on the copilot).
+    const prospectKey = data.email
+      ? emailToProspectKey(data.email)
+      : `guest:${ts}`;
     const walkInId = `${prospectKey.replace(/[^a-zA-Z0-9]/g, '_')}-${ts}`;
     const roomName = `walk-in-${walkInId}`;
 
@@ -97,15 +119,23 @@ export async function POST(req: Request) {
     // Notification is best-effort — a delivery failure should NOT
     // block the prospect from joining the room. They'll just be
     // waiting; Samuel will see the walkIn doc in Firestore even if
-    // the email never lands.
-    try {
-      await notifySamuelOfWalkIn({
+    // the email never lands. Skip the notification entirely for
+    // guest entries (no contact info to reply with — the email
+    // wouldn't add useful context, just noise).
+    if (data.email) {
+      try {
+        await notifySamuelOfWalkIn({
+          walkInId,
+          prospect: { name: data.name, email: data.email },
+          language: data.language,
+        });
+      } catch (err) {
+        console.error('[walk-in init] notification mail failed', err);
+      }
+    } else {
+      console.info('[walk-in init] guest entry — skipping notification mail', {
         walkInId,
-        prospect: { name: data.name, email: data.email },
-        language: data.language,
       });
-    } catch (err) {
-      console.error('[walk-in init] notification mail failed', err);
     }
 
     const token = await mintRoomAccessToken({
@@ -132,34 +162,90 @@ export async function POST(req: Request) {
   }
 
   // ── Mode: join_existing ─────────────────────────────────────────
-  // Samuel clicked the notification email link. Look up the walkIn,
-  // mint his token, return everything WalkInShell needs.
-  const walkIn = await readWalkIn(data.walkInId);
-  if (!walkIn) {
+  // Resolve the id against calendarBookings first (scheduled flow),
+  // then walkIns (lobby flow). Mint a token for whichever side asked.
+
+  // Normalize: regardless of source collection, we end up with the
+  // same shape used downstream by WalkInShell / CallRoom.
+  interface NormalizedBooking {
+    roomName: string;
+    prospectKey: string;
+    prospect: { name: string; email: string };
+    language: 'en' | 'es';
+    scheduledFor: string;
+  }
+  let booking: NormalizedBooking | null = null;
+
+  const calendarBooking = await readCalendarBooking(data.walkInId);
+  if (calendarBooking) {
+    booking = {
+      roomName: calendarBooking.roomName,
+      prospectKey: calendarBooking.prospectKey,
+      prospect: calendarBooking.prospect,
+      language: calendarBooking.language,
+      scheduledFor: calendarBooking.scheduledFor,
+    };
+  } else {
+    const walkIn = await readWalkIn(data.walkInId);
+    if (walkIn) {
+      booking = {
+        roomName: walkIn.roomName,
+        prospectKey: walkIn.prospectKey,
+        prospect: walkIn.prospect,
+        language: walkIn.language,
+        scheduledFor:
+          walkIn.createdAt?.toDate?.().toISOString() ??
+          new Date().toISOString(),
+      };
+    }
+  }
+
+  if (!booking) {
     return NextResponse.json(
-      { error: 'Walk-in not found' },
+      { error: 'Booking not found' },
       { status: 404, headers: cors },
     );
   }
 
+  // Identity differs per side. Therapist is constant; user gets a
+  // per-join unique identity so re-joins after disconnect don't clash
+  // with any still-GC'ing previous identity in the room.
+  const identity =
+    data.side === 'therapist'
+      ? 'therapist-samuel'
+      : `${booking.prospectKey}-${Date.now()}`;
+
   const token = await mintRoomAccessToken({
-    identity: 'therapist-samuel',
-    roomName: walkIn.roomName,
+    identity,
+    roomName: booking.roomName,
   });
+
+  // Trim the projection per side. Therapist gets everything (drives
+  // copilot pre-fill); user gets only what the call-room needs to
+  // greet them.
+  const bookingProjection =
+    data.side === 'therapist'
+      ? {
+          roomName: booking.roomName,
+          prospectKey: booking.prospectKey,
+          prospect: booking.prospect,
+          language: booking.language,
+          scheduledFor: booking.scheduledFor,
+        }
+      : {
+          roomName: booking.roomName,
+          therapistName: 'Samuel',
+          prospectFirstName: booking.prospect.name.split(' ')[0] ?? '',
+          language: booking.language,
+          scheduledFor: booking.scheduledFor,
+        };
 
   return NextResponse.json(
     {
       token,
       wsUrl: getLiveKitWsUrl(),
-      roomName: walkIn.roomName,
-      booking: {
-        roomName: walkIn.roomName,
-        prospectKey: walkIn.prospectKey,
-        prospect: walkIn.prospect,
-        language: walkIn.language,
-        scheduledFor: walkIn.createdAt?.toDate?.().toISOString() ??
-          new Date().toISOString(),
-      },
+      roomName: booking.roomName,
+      booking: bookingProjection,
     },
     { headers: cors },
   );
