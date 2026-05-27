@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { FileText, Send, Sparkles } from "lucide-react"
+import { FileText, Send } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,14 +21,13 @@ import {
   DEMO_CALL_VARIABLES,
 } from "./demo-call-config"
 import { loadCallScript, type LoadedScript } from "@/lib/copilot/load-script"
-import { loadQualification } from "@/lib/copilot/load-qualification"
 import {
   loadSessionState,
   type SessionState,
   makeEmptyState,
 } from "@/lib/copilot/session-storage"
-import { prefillFromQualification } from "@/lib/copilot/prefill-from-qualification"
 import { CopilotSurface } from "./copilot-surface"
+import { QualifyPrefillRow } from "./qualify-prefill-row"
 
 export default function CopilotPage() {
   const [docUrl, setDocUrl] = useState(DEFAULT_DEMO_SCRIPT_DOC_URL)
@@ -68,50 +67,6 @@ export default function CopilotPage() {
       })
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  // ── Manual pre-fill from qualification ─────────────────────────────
-  // The rep types a prospect's phone/email/name; loadQualification looks
-  // up the most-recent qualification doc; prefillFromQualification (the
-  // shared helper) builds the fresh state and triggers cleanings +
-  // suggestion pre-generation. This is the manual path — /demo-call/[id]
-  // uses the same helper but pulls the prospectKey from the booking doc
-  // automatically.
-  const [qualifyIdentifier, setQualifyIdentifier] = useState("")
-  const [isLoadingQualification, setIsLoadingQualification] = useState(false)
-
-  const handleLoadQualification = async () => {
-    const identifier = qualifyIdentifier.trim()
-    if (!identifier || !script || !state) return
-    setIsLoadingQualification(true)
-    try {
-      const resp = await loadQualification(identifier)
-      if (!resp.ok) {
-        toast.error("No qualification found", {
-          description: `Looked up "${identifier}". The prospect either hasn't done /qualify yet or the identifier doesn't match.`,
-        })
-        return
-      }
-      const { filledCount } = prefillFromQualification({
-        qualification: resp.qualification,
-        variables: DEMO_CALL_VARIABLES,
-        script,
-        setState,
-      })
-      const outcomeLabel = resp.qualification.outcome ?? "unknown outcome"
-      toast.success(`Qualification loaded (${outcomeLabel})`, {
-        description:
-          filledCount > 0
-            ? `Pre-filled ${filledCount} variable${filledCount === 1 ? "" : "s"} from the Fit Assessment. Prior session data cleared.`
-            : "No overlapping fields to pre-fill. Prior session data cleared.",
-      })
-    } catch (err) {
-      toast.error("Could not load qualification", {
-        description: err instanceof Error ? err.message : "Unknown error.",
-      })
-    } finally {
-      setIsLoadingQualification(false)
     }
   }
 
@@ -168,40 +123,6 @@ export default function CopilotPage() {
     )
   }
 
-  // Manual qualification-prefill UI — passed as topSlot to CopilotSurface.
-  // /demo-call/[id] does NOT pass a topSlot because it auto-prefills
-  // from booking.prospectKey at mount time.
-  const qualifyPrefillUI = (
-    <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="qualify-identifier" className="text-xs">
-          <Sparkles className="h-3.5 w-3.5" />
-          Pre-fill from qualification (Fit Assessment)
-        </FieldLabel>
-        <div className="flex gap-2">
-          <Input
-            id="qualify-identifier"
-            type="text"
-            placeholder="Prospect phone, email, or name"
-            value={qualifyIdentifier}
-            onChange={(e) => setQualifyIdentifier(e.target.value)}
-            disabled={isLoadingQualification}
-            className="h-8"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleLoadQualification}
-            disabled={isLoadingQualification || !qualifyIdentifier.trim()}
-          >
-            {isLoadingQualification ? <Spinner className="h-4 w-4" /> : "Load"}
-          </Button>
-        </div>
-      </Field>
-    </FieldGroup>
-  )
-
   return (
     <CopilotSurface
       variables={DEMO_CALL_VARIABLES}
@@ -209,7 +130,7 @@ export default function CopilotPage() {
       setState={setState}
       docUrl={docUrl}
       script={script}
-      topSlot={qualifyPrefillUI}
+      topSlot={<QualifyPrefillRow script={script} setState={setState} />}
     />
   )
 }

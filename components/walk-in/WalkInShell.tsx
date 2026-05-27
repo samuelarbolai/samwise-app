@@ -10,6 +10,7 @@ import {
 } from "@/components/demo-call/VideoCallExperience"
 import { VariablesTable } from "@/app/copilot/variables-table"
 import { ScriptPane } from "@/app/copilot/script-pane"
+import { QualifyPrefillRow } from "@/app/copilot/qualify-prefill-row"
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
   DEMO_CALL_VARIABLES,
@@ -109,19 +110,29 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
         const fresh = makeEmptyState(DEMO_CALL_VARIABLES)
         setStateRaw(fresh)
 
-        const q = await loadQualification(initData.booking.prospectKey)
-        if (q.ok && !cancelled) {
-          const { filledCount } = prefillFromQualification({
-            qualification: q.qualification,
-            variables: DEMO_CALL_VARIABLES,
-            script: loaded,
-            setState: setStateRaw,
-          })
-          toast.success("Qualification loaded", {
-            description: `Pre-filled ${filledCount} variable${filledCount === 1 ? "" : "s"}.`,
-          })
-        } else if (!q.ok && !cancelled) {
-          toast.info("No qualification on file for this prospect.")
+        // loadQualification expects a RAW identifier (email/phone/name)
+        // — it normalizes internally via the phone>email>name chain.
+        // We must NOT pass `booking.prospectKey` which is already
+        // normalized as `"email:foo@bar.com"`; the cloud function
+        // would re-interpret that as a name and never find a match.
+        // Use prospect.email directly. Guest walk-ins (blank email)
+        // skip the lookup entirely.
+        const identifier = initData.booking.prospect.email
+        if (identifier) {
+          const q = await loadQualification(identifier)
+          if (q.ok && !cancelled) {
+            const { filledCount } = prefillFromQualification({
+              qualification: q.qualification,
+              variables: DEMO_CALL_VARIABLES,
+              script: loaded,
+              setState: setStateRaw,
+            })
+            toast.success("Qualification loaded", {
+              description: `Pre-filled ${filledCount} variable${filledCount === 1 ? "" : "s"}.`,
+            })
+          } else if (!q.ok && !cancelled) {
+            toast.info("No qualification on file for this prospect.")
+          }
         }
       } catch (err) {
         if (cancelled) return
@@ -175,6 +186,19 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
         />
       </section>
       <section className="overflow-auto border-r">
+        {/* Manual qualification-load fallback — always available. The
+            auto-prefill on mount tries booking.prospect.email; this
+            row lets the rep load a different identifier if the
+            auto-prefill missed (different email at /qualify vs /book)
+            or if the rep wants to re-load mid-call. Seeded with the
+            booking email so the common case is a one-tap reload. */}
+        <div className="border-b bg-muted/30 p-4">
+          <QualifyPrefillRow
+            script={script}
+            setState={setState}
+            initialIdentifier={init.booking.prospect.email}
+          />
+        </div>
         <VariablesTable
           variables={DEMO_CALL_VARIABLES}
           state={state}

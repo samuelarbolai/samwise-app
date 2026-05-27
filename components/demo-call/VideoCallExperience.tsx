@@ -206,7 +206,24 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
       onRoomReady?.(room);
     } catch (err) {
       console.error('[demo-call] connect failed', err);
-      setErrorMsg(err instanceof Error ? err.message : 'Could not connect.');
+      // STRIP LISTENERS BEFORE disconnect — otherwise the Disconnected
+      // event fires and our onDisconnect handler overwrites this
+      // 'error' phase with 'ended', so the user sees "The meeting
+      // has ended" instead of the actual error (e.g. denied camera
+      // permission on mobile Safari). Real bug observed in prod.
+      room.removeAllListeners();
+      const isMediaErr =
+        err instanceof Error &&
+        /Permission|NotAllowed|NotReadable|denied/i.test(
+          `${err.name} ${err.message}`,
+        );
+      setErrorMsg(
+        isMediaErr
+          ? "We couldn't access your camera or microphone. Grant permission and reload the page."
+          : err instanceof Error
+            ? err.message
+            : 'Could not connect.',
+      );
       setPhase('error');
       void room.disconnect();
       roomRef.current = null;
