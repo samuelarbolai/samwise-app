@@ -1,505 +1,1281 @@
-# current-plan.md — Language neutralization + disqualified-rebound flow in the Demo Call script
+# current-plan.md — Native demo-call video room (therapist ↔ user) on LiveKit
 
-> Replaces the previous plan (`appendDemoCallRow` Firestore migration — DONE 2026-05-21).
+> Overwrites the previous plan (Demo Call language neutralization + disqualified-rebound flow — finished, separate task in the master Vibe doc).
 
 ## Plan Summary
 
-Two coupled changes, both shipping in the same task:
+Build a two-sided video-call surface for the Demo Call, replacing the current "rep uses copilot in one window + Cal.com link in another window" arrangement with a single integrated experience powered by LiveKit.
 
-1. **Language neutralization.** Sweep the canonical Demo Call script Doc to remove prospect-rejected clinical-coded terms (`paciente`/`patient`, `comportamiento autodestructivo`/`self-destructive behaviour`, `recaída`/`relapse`) from spoken text. Sourced from a real prospect's call feedback (May 2026, see `samwise-script-work` skill Rule 7).
-2. **Disqualified-rebound flow.** Add a re-classification beat immediately after the desidentification demo. If the rep marks the prospect as `still_disqualified`, the script swaps from the close path to a rebound path: Reflect → Track → Align → Guide, then a referral ask + per-name follow-up loop.
+**Therapist surface** (`samwise-app`, `app.samwise.life/demo-call/[bookingId]`): the existing `/copilot` two-pane shell (variables-table left, script-pane right), plus a third column with the user's video tile and self-view PiP. Copilot pre-fills from the booking's qualification doc automatically (no manual identifier typing). On variable cleaning commit, the copilot broadcasts the cleaned value over LiveKit DataChannel.
 
-To support (2) without forking the Doc, introduce a new in-Doc marker convention `[CONDITION: var=value]` that the `script-pane.tsx` renderer reads to conditionally show/hide phases. Single new variable: `fit_state` with values `qualified | still_disqualified`, defaulting to `qualified`.
+**User surface** (`samwise-landing`, `samwise.life/demo-call/[bookingId]`): a video tile of the therapist plus a `<VariablesPanel>` that hydrates from those DataChannel events — same "watch the cards fill in as you talk" pattern that already works on `/qualify`. No language picker, no welcome card (booking-driven). Self-view PiP. Mute / camera-off controls.
 
-### Explicitly out of scope
-- **Per-register script variants** (war / symbolic / clinical). Captured signals are deferred; the rep adapts voice live for now.
-- **Structured referrals data.** Referrals go into the existing `rep_notes` field freeform; the rep has a separate tracking system.
-- **Re-classify dropdown UI affordance.** The rep sets `fit_state` like any other variable in the variables-table (`select` input). No bespoke prompt.
-- **Per-register variables on the qualification side** (Nova prompts, schema). Hold for a separate task.
-- **Persona Brief generator cloud function.** Hold for a separate task.
-- **Fixing the structural Doc bug** where Phases 13/14 (rebound handlers) sit AFTER the close path (Phase 12). Pre-existing — out of scope.
+**Booking source of truth**: a new Cal.com event type `demo`. A Cal webhook (`calDemoBookingWebhook` cloud function) writes `demoBookings/{calBookingUid}` to Firestore with everything both pages need. The Cal confirmation email links the user directly to their join URL with `{{uid}}` substituted in.
+
+**Recording**: always-on for v1 via LiveKit Cloud Composite Egress, triggered server-side when the therapist's init route fires. Egress target is LiveKit Cloud's managed storage (we'll verify at test time whether this exists at the project's tier; fallback is a GCS bucket). The egress ID is written to the booking doc for later playback.
+
+**Auth**: explicitly deferred. The `bookingId`-as-credential model is fine for internal test users; see the Open decisions section.
+
+### Scope
+
+In:
+- New Cal.com event type `demo` (manual setup by user, in Cal's admin).
+- New cloud function `calDemoBookingWebhook` + Firestore `demoBookings` collection.
+- New Next.js API route in samwise-app: `/api/demo-call/init`.
+- New samwise-app page: `/demo-call/[bookingId]` (therapist).
+- New `<VideoCallExperience>` component in samwise-app (the canonical video-call client wiring; mirrors the patterns in `RitualCallExperience` but for two-human + video).
+- Reuses the existing `/copilot` pieces wholesale; only the page that hosts them is new.
+- DataChannel bridge from copilot → user view (`demo-call:variable_update` events).
+- New `userVisible?: boolean` field on `DemoCallVariable` (per-field opt-in to user-side display).
+- New samwise-landing route: `/demo-call/[bookingId]` (user).
+- Server-side egress start on session start.
+- New env vars on Vercel for both projects + a Cal webhook signing secret.
+
+Out:
+- Scribe agent / auto-extraction of variables (deferred — see "Open decisions").
+- Real auth (deferred — see "Open decisions").
+- Multi-therapist routing (deferred — hardcoded `therapist-samuel` for v1).
+- Recording consent UX (test users acknowledge externally).
+- Per-recording playback UI inside samwise-app (recordings live in LiveKit storage; signed URLs retrieved manually for now).
+- The "Reschedule" / "Cancel" hooks from Cal — webhook handler only handles `BOOKING_CREATED` in v1.
 
 ## Plan Architecture (Flow)
 
 ```
-Demo Doc loaded ─→ loadCallScript Gemini parser
-                    │
-                    ├─→ phases[]: { number, title, blocks: [{ kind, text }] }
-                    │   ([CONDITION: …] lines outside [SAY] become kind:"note" blocks)
-                    │
-                    ▼
-              script-pane.tsx
-                    │
-                    ├─ parsePhaseCondition(phase) → { var, value } | null
-                    ├─ filter visible phases:
-                    │     keep if no condition, OR cleaned[var] === value
-                    ├─ filter [CONDITION: …] note out of each phase's rendered blocks
-                    └─ render
-```
+1) Prospect books via Cal.com (event type "demo")
+   ↓
+   Cal sends BOOKING_CREATED webhook → calDemoBookingWebhook (cloud function)
+   ↓
+   Firestore: demoBookings/{calBookingUid} = {
+     roomName, therapistId: "therapist-samuel",
+     prospectKey, prospect: {name, email, phone},
+     scheduledFor, status: "scheduled"
+   }
+   ↓
+   Cal sends confirmation email to prospect with link:
+     samwise.life/demo-call/{{uid}}
 
-`fit_state` starts at `"qualified"` (seeded by `makeEmptyState` via the new `defaultValue` field on `DemoCallVariable`). The rep flips it to `"still_disqualified"` via the existing variables-table select input after Phase 5c. From that point forward, the qualified-path phases (currently 6–15) hide and the rebound phases (16–17) appear in their place.
+2) Therapist opens app.samwise.life/demo-call/{bookingId} at call time
+   ↓
+   Page fetches /api/demo-call/init { bookingId, side: "therapist" }
+   ↓
+   Route looks up demoBookings/{bookingId} → mints token (identity = "therapist-samuel")
+     + starts RoomCompositeEgress
+     + updates booking doc: status="in_progress", egressId
+   ↓
+   Returns { token, wsUrl, roomName, booking, prospectKey }
+   ↓
+   Therapist page: VideoCallExperience joins room (publishes camera+mic)
+                   + Copilot pre-fills from qualification by prospectKey
+                   + Copilot broadcasts cleaned variables as DataChannel events
+
+3) User clicks link in Cal email → samwise.life/demo-call/{bookingId}
+   ↓
+   Pre-join lobby: name confirm + mic/camera permission grant + "Join" button
+   ↓
+   POST /api/demo-call/init (also on samwise-app, called cross-origin from landing)
+        { bookingId, side: "user" }
+   ↓
+   Route: same booking lookup → mints token (identity = prospectKey-{ts})
+   ↓
+   Returns { token, wsUrl, roomName, booking: {prospect.name, scheduledFor} }
+   ↓
+   Landing page: VideoCallExperience joins same room
+                 + VariablesPanel subscribes to DataChannel
+                 + cards render as therapist's copilot commits cleanings
+
+4) Either side clicks "End call"
+   ↓
+   Disconnects locally
+   ↓
+   LiveKit closes room when last participant leaves (emptyTimeout 30s)
+   ↓
+   Egress stops automatically (RoomComposite ends with the room)
+   ↓
+   Background: a follow-up step in v2 will mark booking status="completed"
+   (For v1: status field stays at "in_progress" until manually updated.
+    Acceptable because we have no UI consuming the field yet.)
+```
 
 ## Plan Structure (Directories and files)
 
 ```
-samwise-app/
-├── app/copilot/
-│   ├── demo-call-config.ts          # MODIFIED: + defaultValue?: string field on type;
-│   │                                #           + fit_state variable in phase 5
-│   └── script-pane.tsx              # MODIFIED: + parsePhaseCondition()
-│                                    #           + filter phases by condition
-│                                    #           + filter [CONDITION] note out of rendered blocks
-└── lib/copilot/
-    └── session-storage.ts           # MODIFIED: makeEmptyState seeds defaultValue
+samwise-backend/cloud-functions/functions/src/
+└── index.ts                                     # MODIFIED: append calDemoBookingWebhook
 
-# External (Google Docs — user applies in browser):
-Demo Call (canonical, post-v0.3)     # EDIT IN PLACE: substitutions + new phases + condition markers
-   Doc ID: 1sBHuGaXCFaP8cmQdUgNpoQYwCq3L4-OfDMDoPR73a5g
-   (v0.3 — ID 1hntQClh8TUUVYOw148sFGRhy33JqtleuvI5BC8rM4eg — was deprecated by the user 2026-05)
+samwise-app/
+├── app/
+│   ├── api/
+│   │   ├── ritual-call/init/route.ts            # (unchanged — reference only)
+│   │   └── demo-call/init/route.ts              # NEW
+│   ├── demo-call/
+│   │   └── [bookingId]/
+│   │       └── page.tsx                         # NEW (therapist)
+│   └── copilot/
+│       ├── page.tsx                             # (unchanged — re-used as a child component)
+│       └── demo-call-config.ts                  # MODIFIED: + userVisible?: boolean field
+├── components/
+│   ├── ritual-call/RitualCallExperience.tsx     # (unchanged — reference only)
+│   └── demo-call/
+│       ├── VideoCallExperience.tsx              # NEW
+│       └── DemoCallShell.tsx                    # NEW (3-column layout therapist-side)
+├── lib/
+│   ├── livekit-dispatch.ts                      # MODIFIED: + startRoomCompositeEgress helper
+│   ├── firebase-admin.ts                        # (unchanged)
+│   └── demo-call/
+│       ├── broadcast.ts                         # NEW (publishVariableUpdate helper)
+│       └── booking.ts                           # NEW (Firestore reader/writer for demoBookings)
+
+samwise-landing/
+├── app/
+│   └── demo-call/
+│       └── [bookingId]/
+│           ├── page.tsx                         # NEW (user)
+│           ├── pre-join.tsx                     # NEW (name confirm + lobby)
+│           ├── call-room.tsx                    # NEW (video + variables panel)
+│           └── demo-call.css                    # NEW
+└── app/qualify/components/variables-panel.tsx   # (unchanged — re-imported)
+
+External (user does in browser, by hand):
+- Cal.com: create event type "demo" + custom fields + confirmation-email template
+- LiveKit Cloud project secrets: add egress credentials (see Phase 0)
+- Vercel: add new env vars on samwise-app AND samwise-landing
 ```
 
-Three files in code (small diffs each). One Google Doc edited in place by the user with the find-and-replace + paste-in list below.
+## Conventions adopted by this plan
+
+- **DataChannel event names** namespaced under `demo-call:` (mirrors the existing `qualification:` namespace from `/qualify`).
+- **Room name** = `demo-call-{calBookingUid}`. Stable across rejoins (LiveKit reuses an existing room if both join the same name). Re-deriving from `bookingId` on the client is safe because both sides resolve the same booking.
+- **Therapist identity** = `therapist-samuel` (hardcoded constant, see Open decisions).
+- **User identity** = `{prospectKey}-{Date.now()}`. Per-join unique so rejoins don't clash if a previous instance hasn't been GC'd; the prefix preserves the rep's "this is prospect X" recognition in the LiveKit dashboard.
 
 ---
 
 ## Modifications (in phases and steps)
 
-### Phase A — Google Doc edits (user applies)
-
-The user does this in the browser; I produce the exact list.
-
-#### Step A.1 — Substitution sweep for clinical-coded terms
-
-Apply each substitution in the Doc. Surrounding context is given so the user can verify each hit before replacing.
-
-**1. Phase 1 — "el paciente" → "la persona"**
-- Find: `Lo creamos porque los psicólogos han tenido la experiencia de que si el paciente hiciera las tareas`
-- Replace with: `Lo creamos porque los psicólogos han tenido la experiencia de que si la persona hiciera las tareas`
-
-**2. Phase 5b — heading "Functional analysis of a relapse"**
-- Find: `### 5b. Functional analysis of a relapse`
-- Replace with: `### 5b. Functional analysis of a setback`
-- (Heading is rep-only, English. Cleaning for consistency.)
-
-**3. Phase 5b — spoken "Cuando tenés una recaída"**
-- Find: `Cuando tenés una recaída, ¿qué pensás de vos mismo?`
-- Replace with: `Cuando tenés un retroceso, ¿qué pensás de vos mismo?`
-
-**4. Phase 6 — spoken "comportamiento autodestructivo" (3 occurrences)**
-- Find (1): `Casi todo el mundo se trata mal a sí mismo cada vez que tiene un comportamiento autodestructivo. Por eso en cada recaída cae más y más.`
-- Replace with: `Casi todo el mundo se trata mal a sí mismo cada vez que pasa lo que está intentando cambiar. Por eso en cada retroceso cae más y más.`
-
-- Find (2): `Imaginá que el comportamiento autodestructivo es como un enemigo externo que ataca la confianza en vos mismo en cada recaída que tenés, porque eso le conviene para ganar espacio en tu mente y tus emociones.`
-- Replace with: `Imaginá que esto que querés cambiar es como un enemigo externo que ataca la confianza en vos mismo en cada retroceso, porque eso le conviene para ganar espacio en tu mente y tus emociones.`
-
-- Find (3): `Esto se puede conceptualizar como identificarse con el problema autodestructivo. Y es casi imposible cambiar el comportamiento cuando uno cree que ese comportamiento es uno mismo.`
-- Replace with: `Esto se puede ver como identificarse con el problema. Y es casi imposible cambiar el comportamiento cuando uno cree que ese comportamiento es uno mismo.`
-
-**5. Phase 6 — closing line of Phase 6**
-- Find: `Entonces eso es lo primero que vamos a hacer: ayudarte a desidentificarte para que puedas declararle la guerra a este enemigo, declararle la guerra a tu comportamiento autodestructivo.`
-- Replace with: `Entonces eso es lo primero que vamos a hacer: ayudarte a desidentificarte para que puedas declararle la guerra a este enemigo, declararle la guerra a lo que querés cambiar.`
-
-**6. Phase 7 — spoken "una recaída"**
-- Find: `Cuando te das cuenta de eso, una recaída ya no es un completo fracaso personal, sino un episodio de mala salud que se debe y se puede tratar`
-- Replace with: `Cuando te das cuenta de eso, un retroceso ya no es un completo fracaso personal, sino un episodio de mala salud que se debe y se puede tratar`
-
-**7. Phase 7 — spoken "comportamiento autodestructivo"**
-- Find: `Necesitamos hacer un mantra de desidentificación. Vamos a hacerlo viendo a tu comportamiento autodestructivo como un enemigo concreto y externo`
-- Replace with: `Necesitamos hacer un mantra de desidentificación. Vamos a hacerlo viendo lo que querés cambiar como un enemigo concreto y externo`
-
-**8. Phase 9 — spoken "una recaída" (new substitution, surfaced when audit moved to canonical Doc)**
-- Find: `Definimos qué es exactamente una recaída para vos.`
-- Replace with: `Definimos qué es exactamente un retroceso para vos.`
-
-**9. Phase 15 — spoken "los pacientes"**
-- Find: `Cuando los pacientes completan las tareas entre sesiones, alrededor del 65% avanza`
-- Replace with: `Cuando las personas completan las tareas entre sesiones, alrededor del 65% avanza`
-
-**Not changed (deliberate):**
-- `enfermo` / `enfermedad` in Phases 7 and 8 — load-bearing in the desidentification mantra ("Estoy enfermo con… porque esto es externo a mí"). The framework deliberately uses "sick with a condition" as the externalization device. Different semantic from "patient." Leave alone.
-- Internal variable names containing `_relapse` (`thoughts_during_relapse` etc.) — rep-facing only, never spoken. Leave alone.
-- "self-destructive habits" in rep-only Phase 2 instruction (`(doomscrolling, addictions, productivity, self-destructive habits)`) — rep-only guidance, not spoken. Leave alone for now; can revisit if it bleeds into rep voice during calls.
-
-#### Step A.2 — Append a re-classify beat at the end of Phase 8
-
-After Phase 8's mantra commitment (the [SAY] mantra block and the `Capture: {{clinical_picture_description}}` line), append this new sub-section. Relocated from "Phase 5c" in late 2026-05 — classification must happen after the FULL desidentification arc (Phases 5–8), not after Phase 5 alone, because Phases 6–8 are where the disqualified prospect actually sees the framework's value (and that recognition is what makes them a high-quality referrer).
-
-```markdown
-## Phase 8.5 — Re-classify fit after the desidentification work
-
-[SAY]Acabamos de hacer un ejercicio importante. Voy a tomarme un momento para evaluar si lo que hicimos hoy nos permite continuar el proceso con vos.[/SAY]
-
-⚠️ **Mandatory beat. Always run this** — after the full Phase 5 → Phase 8 desidentification arc. The framework demo runs for EVERY prospect, qualified or not. Classification happens here, AFTER they've seen the framework, named the enemy, and said the mantra aloud.
-
-Some prospects who looked qualified going into the demo engage with the reframe and clearly SEE the framework's value — but they receive it as valid for *someone else*, not for themselves right now. In Samuel's businessman demos (May 2026), this is the dominant pattern: the prospect recognizes the territory because they've had this kind of problem in their own past or in someone close to them. They're high-recognition prospects but their current identification with the behaviour is shallower than the fit assessment suggested. They're not buyers; they're high-quality potential referrers.
-
-☞ **Ask yourself silently — do not say this aloud:** Did the desidentification work make the prospect see THEMSELVES in the problem right now? Or did they see the framework clearly but receive it as something valid for someone else?
-
-**Set `fit_state` in the variables table:**
-
-- `qualified` — the prospect saw themselves in it. They need this now. Continue to Phase 9 (Roadmap).
-- `still_disqualified` — the prospect saw the framework clearly but received it as something for someone else (often because they've had similar problems in their past or close to them). Their current identification doesn't justify acting now. The script skips Phases 9–15 (close path) and swaps to Phase 16 (rebound + referrals).
-
-The next phase you see depends on which value you pick.
-```
-
-This sub-section opens with one [SAY] block (visible to the prospect — makes the rep's evaluation moment explicit) followed by rep-only guidance.
-
-#### Step A.3 — (Obsolete — Doc is already correctly numbered)
-
-This step was based on the deprecated v0.3 Doc which had a "Phase 1" mislabel at the bottom. The current canonical Doc is already numbered correctly through Phase 15. Skip this step.
-
-#### Step A.4 — Tag the qualified-path phases with `[CONDITION: fit_state=qualified]`
-
-For each of these phases, add the marker as a STANDALONE LINE between the phase heading (`## Phase N — Title`) and the Goal line. Place it OUTSIDE any `[SAY]` block — it must be a plain line so Gemini's parser tags it as a note block.
-
-Phases to tag (7 total — only the close path; Phases 6–8 always show because they're the value-demo arc that runs for every prospect, qualified or not):
-- Phase 9 — Roadmap
-- Phase 10 — Eliminate perception of risk
-- Phase 11 — Price
-- Phase 12 — Close and next steps
-- Phase 13 — Handling the economic rebound
-- Phase 14 — Handling the alternatives rebound
-- Phase 15 — Handling the scientific evidence rebound
-
-The line to add to each phase, immediately under its `##` heading:
-
-```
-[CONDITION: fit_state=qualified]
-```
-
-(The `After the call (fill within 10 minutes)` section sits between Phase 12 and Phase 13 in the current Doc. Leave it as-is; it's rep-only checklist text without a `Phase N` heading, so it's not parsed as a phase and doesn't need a condition tag.)
-
-#### Step A.5 — Append the rebound phases
-
-At the very end of the Doc, after the now-renumbered Phase 15, append the two new phases below verbatim.
-
-```markdown
-## Phase 16 — Rebound: confirm value, surface why, bridge to referral
-
-[CONDITION: fit_state=still_disqualified]
-
-**Goal:** A four-beat conversation (Reflect → Track → Align → Guide) that lands on the prospect naming the people in their life who actually have the problem. Each beat serves a specific purpose tied to the actual prospect-state filtered for in Phase 5c: confirm they saw the framework's value, identify *why* they saw it (typically: their own past experience or someone close to them), use that as the bridge from "you've seen this" to "you know others who have this," and ask for the names.
-
-☞ **Architecture map** (each beat = specific purpose; not generic listening):
-- **Reflect** = confirm they saw value. Open question.
-- **Track** = surface WHY they saw value. Listen for / elicit the second thread (past experience, close-person experience).
-- **Align** = bridge "you've seen this" → "you know others who have this." Samuel's canonical line below.
-- **Guide** = ask for the names explicitly. Capture into {{rep_notes}}.
-
-⚠️ **If at Reflect the prospect did NOT actually see the framework's value,** the Phase 5c classification was wrong. Flag in rep_notes, thank them dignifiedly, end the call without the referral ask.
-
-### Reflect
-
-[SAY]¿Cómo te cayó lo que acabamos de hacer?[/SAY]
-
-⚠️ **Spoken line TENTATIVE** — adapt to your register. Goal: open invitation. Listen for the value-recognition. Capture their words into {{rep_notes}}.
-
-### Track
-
-The prospect will often surface their second thread unprompted (they've had this kind of problem, or someone close has). If they don't, elicit:
-
-[SAY]¿Por qué te resuena? ¿De dónde lo conocés?[/SAY]
-
-⚠️ **Spoken line TENTATIVE** — this is the listening-and-eliciting beat. The rep adapts to whatever the prospect said in Reflect. Capture the *why* verbatim into {{rep_notes}} — it's what makes the next beats land honestly.
-
-### Align (Samuel's exemplar — preserve close to verbatim)
-
-[SAY]¿Has visto esto en otras personas que conocés?[/SAY]
-
-This is the canonical bridge line from Samuel's call experience. Use it close to verbatim. Wait for the answer.
-
-### Guide
-
-If they confirm they know people who fit:
-
-[SAY]¿Quiénes son?[/SAY]
-
-⚠️ **Spoken line TENTATIVE** — goal is to elicit explicit names. Capture into {{rep_notes}}: list of names, one per line, with the prospect's connection to each (relationship + the specific behaviour they recognized for that person).
-
-**If they don't surface anyone in Align** (e.g. *"no, en realidad no"*): they either didn't actually see the value (you misclassified at Phase 5c) OR they're not willing to refer. Either way — thank them dignifiedly, mark `outcome = disqualified`, end the call without forcing the per-name loop.
-
-## Phase 17 — Rebound: per-name follow-up
-
-[CONDITION: fit_state=still_disqualified]
-
-**Goal:** For each name surfaced in Phase 16's Guide beat, run the 4-question loop. One name at a time — do not batch.
-
-### Per-name loop
-
-☞ For each name in the list captured in Phase 16, ask all four questions in order. Capture each answer into {{rep_notes}}.
-
-**Why they could benefit:**
-
-[SAY]Vamos uno por uno. [Nombre]: ¿por qué creés que él/ella podría aprovechar este servicio?[/SAY]
-
-⚠️ **Spoken phrasing TENTATIVE.** Capture: the prospect's reasoning — what behaviour they see in this person, what motivation, what would resonate.
-
-**Willingness:**
-
-[SAY]¿Qué tan dispuesto estás a empujarlo a conectarse con nosotros?[/SAY]
-
-Wait. Capture.
-
-**Blocker:**
-
-[SAY]¿Qué te bloquea para hacerlo hoy?[/SAY]
-
-Wait. Capture.
-
-**How we can help:**
-
-[SAY]¿Cómo podemos ayudarte a hacer ese puente?[/SAY]
-
-Wait. Capture.
-
-☞ **The fourth question opens a help-offer space.** No canonical menu of forms-of-help has been established yet — improvise based on what the prospect surfaces as their blocker. (Open item: as patterns emerge across real rebounds, document the canonical help-options here.)
-
-### Close
-
-⚠️ **No evidence yet on the right closing language.** Rep improvises a warm thank-you, marks `outcome = disqualified`, sets `next_step` from the per-referral follow-up dates captured in rep_notes, ends the call.
-```
-
----
-
-#### Step A.6 — Add admission-test scarcity inserts (3 spoken-text edits)
-
-The dynamic: the rep is silently evaluating the prospect throughout the call; the rep's verdicts are made *visible* at three checkpoints. The prospect spends the call earning continuation rather than opting in. Register is clinician-authority but the spoken language stays neutral (no `clínico/clínicamente/paciente/diagnóstico`) — the authority comes from the act of evaluating and from "vi lo que necesitaba ver," not from medical vocabulary.
-
-Three changes, each in a different phase. Each is a single SAY block.
-
-**(a) Phase 1 — replace the closing sentence**
-
-In the existing Phase 1 spoken text, replace this sentence:
-
-> *Estamos en el primer paso, que es el espacio de compatibilidad y bienvenida. Aquí vamos a ver si nuestro servicio es compatible con tu caso y definir claramente qué es lo que querés.*
-
-With this:
-
-> *[SAY]Estamos en el primer paso, que es el espacio de compatibilidad y bienvenida. En estos 30 minutos voy a evaluar con vos si tu caso es uno con el que podemos trabajar bien — y también para que vos tengas claridad sobre qué es lo que querés. No todas las personas que llegan a este paso pasan al siguiente. Eso es parte del proceso.[/SAY]*
-
-Why: sets the evaluation-direction from minute one. "Evaluar con vos" claims the rep's authority without medicalizing. "Tu caso" frames the prospect's situation as something we either take on or don't. "No todas las personas pasan al siguiente paso" lands the test without bragging or threatening. "Eso es parte del proceso" normalizes scarcity as routine.
-
-**(b) (Merged into Step A.2 — the scarcity SAY block at the top of the re-classify beat is now baked into the Phase 8.5 paste-in itself.)**
-
-**(c) Phase 11 — insert a SAY block at the very top (above the body-language warning)**
-
-At the top of `## Phase 11 — Price`, BEFORE the existing ⚠️ Body language at price warning, insert this SAY block:
-
-> *[SAY]Antes de hablar de inversión, te confirmo algo: vi lo que necesitaba ver. Tu caso es uno con el que podemos trabajar bien. Por eso seguimos.[/SAY]*
-
-Why: the verdict-delivered moment. "Vi lo que necesitaba ver" makes the silent evaluation explicit *after* it's been passed — the prospect feels the test was real. "Por eso seguimos" makes it implicit that absence of this confirmation would have ended the call. The price discussion then lands on top of "you got in" rather than "they want my money."
-
-**Language audit for Step A.6:** verified — none of the three inserts contains `paciente / patient`, `comportamiento autodestructivo / self-destructive behaviour`, `recaída / relapse`, or `clínico/clínicamente/diagnóstico/diagnose`. Authority is carried by the verb `evaluar`, the noun `criterio` (implicit), and the framing "tu caso es uno con el que podemos trabajar bien."
-
----
-
-### Phase B — Frontend code changes
-
-#### Step B.1 — Add `defaultValue` field + `fit_state` variable to `demo-call-config.ts`
-
-- **In-file location:** `samwise-app/app/copilot/demo-call-config.ts`
-- **Should not be modified:** any existing variable's metadata, the `DEMO_CALL_PHASE` type values (`5` is reused — see below), the URL constants, `KNOWN_REPS`, `FUNNEL_SHEET_COLUMNS`.
-
-Two edits:
-
-(a) Extend the `DemoCallVariable` interface (around line 42):
-
-```ts
-export interface DemoCallVariable {
-  name: string
-  label: string
-  phase: DemoCallPhase
-  meaning: string
-  inputKind: InputKind
-  options?: string[]
-  /** UI-only tag shown next to the field. Doesn't drive cleaning behaviour
-   * (cleaning is driven by frameworkSemantics + script contexts). */
-  verbatim?: boolean
-  cleanable?: boolean
-  /** Per-field cleaning instructions sent to Gemini. Tells the cleaner
-   * what to extract vs ignore, what shape the cleaned output should take,
-   * and any verbatim/voice rules specific to this variable. */
-  frameworkSemantics?: string
-  /** Initial value seeded into both raw and cleaned when a fresh session is
-   * created. Used by phase-condition variables (e.g. fit_state) so the
-   * default branch of the script is visible before the rep touches anything. */
-  defaultValue?: string
-}
-```
-
-(b) Add the new variable at the END of the Phase 5 block (around line 292, immediately after `grado_de_identificacion`):
-
-```ts
-  {
-    name: "fit_state",
-    label: "Fit state (post-demo)",
-    phase: 5,
-    meaning: "Re-classification after the desidentification demo. Drives [CONDITION] phase visibility in the script-pane.",
-    inputKind: "select",
-    options: ["qualified", "still_disqualified"],
-    cleanable: false,
-    defaultValue: "qualified",
-  },
-```
-
-- **Explanation:** `fit_state` is a `select`, not cleanable (no LLM denoising — it's a rep-set toggle). `defaultValue: "qualified"` means a fresh session shows the canonical close path; the rep flips it after Phase 5c.
-
-#### Step B.2 — Seed `defaultValue` in `makeEmptyState`
-
-- **In-file location:** `samwise-app/lib/copilot/session-storage.ts`, `makeEmptyState` (lines 27–43).
-- **Should not be modified:** the `KEY` constant (`copilot:session:v3` — the shape doesn't change incompatibly; old sessions seeded with `""` for fit_state still render correctly because the filter logic in script-pane.tsx falls back to defaultValue), the `call_date` autopopulate.
-
-Modify the loop to honour `defaultValue`:
-
-```ts
-export function makeEmptyState(vars: DemoCallVariable[]): SessionState {
-  const raw: Record<string, string> = {}
-  const cleaned: Record<string, string> = {}
-  const cleaning: Record<string, boolean> = {}
-  for (const v of vars) {
-    const initial = v.defaultValue ?? ""
-    raw[v.name] = initial
-    cleaned[v.name] = initial
-    cleaning[v.name] = false
+### Phase 0 — Manual setup (user does in browser, before any code work)
+
+#### Step 0.1 — Cal.com: create the "demo" event type
+
+In Cal.com admin (the team the Breakthrough Call already lives under):
+
+1. Create a new event type, slug `demo`, length 45 minutes (Samuel's stated Demo Call length — confirm).
+2. Add custom booking fields the webhook will rely on:
+   - `Full name` (built-in, required)
+   - `Email` (built-in, required)
+   - `Phone number` (built-in or custom, required — used to derive `prospectKey` if email-derived key isn't available)
+   - `Preferred language` (custom, select `en | es`, required) — drives the user-side UI language
+3. In the confirmation-email template, add the join URL on its own line. Cal exposes `{{uid}}` as a template variable:
+   ```
+   Your demo call link:
+   https://samwise.life/demo-call/{{uid}}
+   ```
+   (Verify the exact variable name in Cal's docs — may be `{BOOKING_UID}` or similar depending on Cal version.)
+4. Under the event type's "Webhooks" tab, add a webhook for the `BOOKING_CREATED` trigger pointing at the cloud function URL (will be filled in after Step 1.1 deploys). Optionally set a signing secret (recommended) — call it `CAL_WEBHOOK_SECRET` and copy the value for Step 0.3.
+
+#### Step 0.2 — LiveKit Cloud: enable Composite Egress + storage
+
+In LiveKit Cloud dashboard for the existing `arbor-a93j2951` project:
+
+1. Navigate to Egress (or "Recordings") settings.
+2. Confirm Composite Egress is enabled for the project. If the project tier offers managed storage, enable it and note the access path. If it does NOT and requires a bring-your-own bucket, fall back to creating a GCS bucket `samwise-demo-call-recordings` in `arbor-2026` and providing S3-compatible credentials. **Decision deferred to test time** — write the egress code path-agnostic (Phase 1.2 below).
+
+#### Step 0.3 — Vercel env vars
+
+Add to BOTH samwise-app AND samwise-landing on Production + Preview:
+
+| Key | Where | Value |
+|---|---|---|
+| `LIVEKIT_URL` | samwise-app, samwise-landing | existing (mirror from samwise-app's ritual-call config) |
+| `LIVEKIT_API_KEY` | samwise-app, samwise-landing | existing |
+| `LIVEKIT_API_SECRET` | samwise-app, samwise-landing | existing |
+| `FIREBASE_SERVICE_ACCOUNT` | samwise-app, samwise-landing | existing (samwise-app already has this) |
+| `CAL_WEBHOOK_SECRET` | cloud-functions runtime env | new (from Step 0.1.4) |
+| `EGRESS_STORAGE_*` (if BYO bucket) | samwise-app only | new — see Step 1.2 |
+
+Re-verify the FIREBASE_SERVICE_ACCOUNT paste trap on samwise-landing per the `samwise-app-livekit-integration` skill: pull back down with `vercel env pull` and confirm `JSON.parse` succeeds.
+
+### Phase 1 — Shared infrastructure (samwise-app)
+
+#### Step 1.1 — Extend `lib/livekit-dispatch.ts` with an egress helper
+
+- **In-file location:** `samwise-app/lib/livekit-dispatch.ts`, append below `getLiveKitWsUrl`.
+- **Should not be modified:** `mintRoomAccessToken`, `createAgentDispatch` (still used by `/api/ritual-call/init`), `getLiveKitWsUrl`, `requireEnv`.
+- **Code (append):**
+  ```ts
+  import { EgressClient, EncodedFileType, EncodedFileOutput } from 'livekit-server-sdk';
+
+  // Starts a Composite Egress recording for the room. Returns the egress ID
+  // so callers can persist it on the booking doc for later playback.
+  // RoomComposite renders one MP4 with both participants' video + audio
+  // composited into a single track. Auto-stops when the room is empty.
+  export async function startRoomCompositeEgress(args: {
+    roomName: string;
+    fileName: string;
+  }): Promise<string> {
+    const client = new EgressClient(
+      requireEnv('LIVEKIT_URL'),
+      requireEnv('LIVEKIT_API_KEY'),
+      requireEnv('LIVEKIT_API_SECRET'),
+    );
+    const output: EncodedFileOutput = new EncodedFileOutput({
+      fileType: EncodedFileType.MP4,
+      filepath: args.fileName,
+      // If BYO storage was chosen in Step 0.2, populate output.output here
+      // with the S3Upload / GCPUpload struct holding bucket + creds. If
+      // LiveKit Cloud's managed storage was chosen, leave output.output
+      // unset — LiveKit writes to project-default storage.
+    });
+    const info = await client.startRoomCompositeEgress(args.roomName, {
+      audioOnly: false,
+      videoOnly: false,
+      file: output,
+    });
+    return info.egressId;
   }
-  // Auto-set call_date today.
-  if (raw.call_date !== undefined) {
-    const today = new Date().toISOString().slice(0, 10)
-    raw.call_date = today
-    cleaned.call_date = today
+  ```
+- **Explanation:** thin server-side helper that mirrors the existing `createAgentDispatch` style — assert env, construct client, return the value the route needs. Storage configuration is a single-line edit when we confirm the right path at test time.
+
+#### Step 1.2 — Booking reader/writer
+
+- **In-file location:** new file `samwise-app/lib/demo-call/booking.ts`.
+- **Code:**
+  ```ts
+  import 'server-only';
+  import { FieldValue } from 'firebase-admin/firestore';
+  import { getDb } from '@/lib/firebase-admin';
+
+  export interface DemoBookingDoc {
+    roomName: string;
+    therapistId: string;
+    prospectKey: string;
+    prospect: { name: string; email: string; phone: string };
+    language: 'en' | 'es';
+    scheduledFor: string;   // ISO 8601
+    status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+    egressId?: string;
+    createdAt: FirebaseFirestore.Timestamp;
   }
-  return { raw, cleaned, cleaning }
-}
-```
 
-- **Explanation:** Variables with `defaultValue` start at that value in both raw and cleaned. `fit_state` therefore starts at `"qualified"`. Existing variables without `defaultValue` continue to start at `""`. The `call_date` special case stays.
-
-#### Step B.3 — Parse `[CONDITION: var=value]` and filter phases in `script-pane.tsx`
-
-- **In-file location:** `samwise-app/app/copilot/script-pane.tsx`.
-- **Should not be modified:** `renderText`, `Block`, `resolveBlocks`, `scrollVarsToPhase`, `scrollVarsToFirstSubstitutedVar`, the IntersectionObserver setup.
-
-Two additions:
-
-(a) A helper that extracts a condition from a phase's note blocks AND a helper that filters the condition note out of the visible blocks (add above `ScriptPane`, after `resolveBlocks`):
-
-```ts
-// A phase may opt into conditional visibility by including a single
-// `[CONDITION: var=value]` line outside any [SAY] block. The Gemini parser
-// renders that line as a note block; this helper extracts the pair from
-// the first matching note in the phase.
-const CONDITION_RE = /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w-]+)\s*\]\s*$/
-
-function parsePhaseCondition(
-  phase: LoadedPhase,
-): { var: string; value: string } | null {
-  for (const block of phase.blocks) {
-    if (block.kind !== "note") continue
-    const m = CONDITION_RE.exec(block.text)
-    if (m) return { var: m[1], value: m[2] }
+  export async function readDemoBooking(bookingId: string): Promise<DemoBookingDoc | null> {
+    const snap = await getDb().collection('demoBookings').doc(bookingId).get();
+    if (!snap.exists) return null;
+    return snap.data() as DemoBookingDoc;
   }
-  return null
-}
 
-// Removes the [CONDITION: …] note from the rendered output so the rep
-// doesn't see the marker line itself in the script pane.
-function blocksWithoutConditionMarker(blocks: ScriptBlock[]): ScriptBlock[] {
-  return blocks.filter(
-    (b) => !(b.kind === "note" && CONDITION_RE.test(b.text)),
-  )
-}
-```
+  export async function markBookingInProgress(args: {
+    bookingId: string;
+    egressId: string;
+  }): Promise<void> {
+    await getDb().collection('demoBookings').doc(args.bookingId).update({
+      status: 'in_progress',
+      egressId: args.egressId,
+      startedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  ```
 
-(b) Apply the filter in the `ScriptPane` component's render. Replace the `phases.map(...)` body with:
+### Phase 2 — Cal webhook (samwise-backend/cloud-functions)
 
-```tsx
-return (
-  <div className="mx-auto max-w-3xl p-6">
-    {phases.map((p) => {
-      const condition = parsePhaseCondition(p)
-      if (condition && cleaned[condition.var] !== condition.value) {
-        return null
+#### Step 2.1 — Append `calDemoBookingWebhook` to `functions/src/index.ts`
+
+- **In-file location:** `samwise-backend/cloud-functions/functions/src/index.ts`, append at the end of the file (after the last exported function — keep it grouped near related onRequest exports).
+- **Should not be modified:** any existing function, the initialization block, helpers like `requireEnv`.
+- **Code (append; full function with HMAC verification + idempotent write):**
+  ```ts
+  // =============================================================================
+  // calDemoBookingWebhook
+  // =============================================================================
+  // Receives Cal.com BOOKING_CREATED webhooks for the "demo" event type and
+  // writes a demoBookings/{calBookingUid} doc that both the therapist
+  // (samwise-app /demo-call/[bookingId]) and the user (samwise-landing
+  // /demo-call/[bookingId]) read at join time.
+  //
+  // Idempotent on Cal's booking UID — Cal retries on non-2xx for up to 3
+  // attempts, and re-firing during a hot deploy is a normal occurrence.
+  // We write with .set({merge: true}) so a re-fire is a no-op rather than
+  // a corruption.
+  //
+  // HMAC signature verification: Cal sends X-Cal-Signature-256 = hex(HMAC-SHA256(
+  // body, CAL_WEBHOOK_SECRET)). We reject mismatches with 401 BEFORE parsing
+  // the body to avoid using attacker-controlled input.
+  // =============================================================================
+
+  import {createHmac, timingSafeEqual} from "crypto";
+
+  function normalizePhoneOrEmailOrName(args: {
+    phone?: string;
+    email?: string;
+    name?: string;
+  }): string {
+    // Mirrors the prospectKey chain from extractQualification + submitQualification.
+    // phone > email > name. Phone normalized to digits-only; email lowercased.
+    if (args.phone) {
+      const digits = args.phone.replace(/\D/g, "");
+      if (digits.length >= 7) return `phone:${digits}`;
+    }
+    if (args.email) return `email:${args.email.trim().toLowerCase()}`;
+    if (args.name) {
+      const slug = args.name.trim().toLowerCase().replace(/\s+/g, "-");
+      if (slug) return `name:${slug}`;
+    }
+    return `unknown:${Date.now()}`;
+  }
+
+  export const calDemoBookingWebhook = onRequest(
+    {region: "us-central1", cors: false},
+    async (req, res) => {
+      if (req.method !== "POST") {
+        res.status(405).send("Method not allowed");
+        return;
       }
-      const visibleBlocks = blocksWithoutConditionMarker(resolveBlocks(p))
-      return (
-        <section key={String(p.number)} className="mb-10">
-          <h2
-            id={`script-phase-${String(p.number)}`}
-            data-script-phase={String(p.number)}
-            className="mb-4 scroll-mt-4"
-          >
-            <button
-              type="button"
-              onClick={() => scrollVarsToFirstSubstitutedVar(p)}
-              className="text-xs font-semibold text-muted-foreground uppercase tracking-widest hover:text-foreground transition cursor-pointer text-left w-full"
-              title="Jump variables pane to the first variable substituted here"
-            >
-              {typeof p.number === "number" ? `Phase ${p.number}` : p.number} —{" "}
-              {p.title}
-            </button>
-          </h2>
-          <div className="flex flex-col gap-3">
-            {visibleBlocks.map((b, i) => (
-              <Block key={i} block={b} cleaned={cleaned} />
-            ))}
-          </div>
-        </section>
-      )
-    })}
-  </div>
-)
-```
 
+      // HMAC verify before touching the parsed body.
+      const secret = process.env.CAL_WEBHOOK_SECRET;
+      if (!secret) {
+        logger.error("[calDemoBookingWebhook] CAL_WEBHOOK_SECRET not set");
+        res.status(500).send("Server misconfigured");
+        return;
+      }
+      const sig = req.header("X-Cal-Signature-256") ?? "";
+      const rawBody = (req as unknown as {rawBody: Buffer}).rawBody;
+      if (!rawBody) {
+        res.status(400).send("Missing raw body");
+        return;
+      }
+      const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+      const sigBuf = Buffer.from(sig, "hex");
+      const expBuf = Buffer.from(expected, "hex");
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        logger.warn("[calDemoBookingWebhook] HMAC mismatch", {
+          received: sig.slice(0, 12),
+        });
+        res.status(401).send("Invalid signature");
+        return;
+      }
+
+      const body = req.body as {
+        triggerEvent?: string;
+        payload?: {
+          uid?: string;
+          eventTypeId?: number;
+          eventType?: {slug?: string};
+          startTime?: string;
+          attendees?: Array<{
+            name?: string;
+            email?: string;
+            timeZone?: string;
+            language?: {locale?: string};
+          }>;
+          responses?: Record<string, unknown>;
+        };
+      };
+
+      if (body.triggerEvent !== "BOOKING_CREATED") {
+        // We only handle creates in v1. Acknowledge other events with 200 so
+        // Cal doesn't retry, but don't write anything.
+        res.status(200).send("ignored");
+        return;
+      }
+
+      const payload = body.payload ?? {};
+      const bookingUid = payload.uid;
+      if (!bookingUid) {
+        logger.error("[calDemoBookingWebhook] payload missing uid", {body});
+        res.status(400).send("Missing booking uid");
+        return;
+      }
+
+      // Defensive scope: only process bookings for the "demo" event type.
+      if (payload.eventType?.slug !== "demo") {
+        logger.info("[calDemoBookingWebhook] non-demo event, ignoring", {
+          slug: payload.eventType?.slug,
+        });
+        res.status(200).send("ignored");
+        return;
+      }
+
+      const attendee = payload.attendees?.[0] ?? {};
+      const phone = (payload.responses?.phone as string | undefined) ?? "";
+      const email = attendee.email ?? "";
+      const name = attendee.name ?? "";
+      const language: "en" | "es" =
+        attendee.language?.locale?.startsWith("es") ? "es" : "en";
+
+      const prospectKey = normalizePhoneOrEmailOrName({phone, email, name});
+
+      const docData = {
+        roomName: `demo-call-${bookingUid}`,
+        therapistId: "therapist-samuel",
+        prospectKey,
+        prospect: {name, email, phone},
+        language,
+        scheduledFor: payload.startTime ?? new Date().toISOString(),
+        status: "scheduled",
+        createdAt: FieldValue.serverTimestamp(),
+      };
+
+      await getFirestore()
+        .collection("demoBookings")
+        .doc(bookingUid)
+        .set(docData, {merge: true});
+
+      logger.info("[calDemoBookingWebhook] booking written", {
+        bookingUid,
+        prospectKey,
+      });
+      res.status(200).send("ok");
+    },
+  );
+  ```
+- **Explanation:** classic Cal webhook handler. HMAC verify first (timingSafeEqual to avoid timing oracle), then validate triggerEvent and event-type slug, normalize the prospectKey from the same phone > email > name chain used by `extractQualification` (so the rep's `loadQualification` lookup from `/copilot` still works), and write idempotently. Region `us-central1` to match existing functions.
+
+#### Step 2.2 — Deploy + record the URL
+
+- **Action:** `firebase deploy --only functions:calDemoBookingWebhook` (from `samwise-backend/cloud-functions/`).
+- Note the deployed URL (`https://caldemobookingwebhook-<hash>-uc.a.run.app`).
+- Paste into Cal.com webhook config (Step 0.1.4).
+
+### Phase 3 — Init route (samwise-app)
+
+#### Step 3.1 — Add `/api/demo-call/init`
+
+- **In-file location:** new file `samwise-app/app/api/demo-call/init/route.ts`.
+- **Code:**
+  ```ts
+  import {NextResponse} from 'next/server';
+  import {z} from 'zod';
+  import {
+    getLiveKitWsUrl,
+    mintRoomAccessToken,
+    startRoomCompositeEgress,
+  } from '@/lib/livekit-dispatch';
+  import {readDemoBooking, markBookingInProgress} from '@/lib/demo-call/booking';
+
+  export const runtime = 'nodejs';
+
+  const RequestSchema = z.object({
+    bookingId: z.string().min(1),
+    side: z.enum(['therapist', 'user']),
+  });
+
+  const ALLOWED_ORIGINS = [
+    'https://samwise.life',
+    'https://www.samwise.life',
+    // dev origins for samwise-landing
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ];
+
+  function corsHeaders(origin: string | null): Record<string, string> {
+    const allowed = origin && ALLOWED_ORIGINS.includes(origin) ? origin : '';
+    return {
+      'Access-Control-Allow-Origin': allowed,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Vary': 'Origin',
+    };
+  }
+
+  export async function OPTIONS(req: Request) {
+    return new NextResponse(null, {status: 204, headers: corsHeaders(req.headers.get('origin'))});
+  }
+
+  export async function POST(req: Request) {
+    const cors = corsHeaders(req.headers.get('origin'));
+    let body: unknown;
+    try { body = await req.json(); } catch {
+      return NextResponse.json({error: 'Invalid JSON body'}, {status: 400, headers: cors});
+    }
+    const parsed = RequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({error: 'Invalid request'}, {status: 400, headers: cors});
+    }
+    const {bookingId, side} = parsed.data;
+
+    const booking = await readDemoBooking(bookingId);
+    if (!booking) {
+      return NextResponse.json({error: 'Booking not found'}, {status: 404, headers: cors});
+    }
+    if (booking.status === 'cancelled') {
+      return NextResponse.json({error: 'Booking is cancelled'}, {status: 410, headers: cors});
+    }
+
+    const identity =
+      side === 'therapist'
+        ? booking.therapistId
+        : `${booking.prospectKey}-${Date.now()}`;
+
+    // Therapist-side init also starts egress (idempotency: if the booking
+    // already has an egressId, don't restart — recording is per-room and
+    // the existing one is still going).
+    if (side === 'therapist' && !booking.egressId) {
+      try {
+        const egressId = await startRoomCompositeEgress({
+          roomName: booking.roomName,
+          fileName: `demo-call/${bookingId}-{time}.mp4`,
+        });
+        await markBookingInProgress({bookingId, egressId});
+      } catch (err) {
+        // Recording failure should NOT block the call. Log and continue.
+        console.error('[demo-call init] egress start failed', err);
+      }
+    }
+
+    const token = await mintRoomAccessToken({
+      identity,
+      roomName: booking.roomName,
+    });
+
+    // Trim the booking projection per side — therapist gets everything
+    // (drives copilot pre-fill), user gets only what they need to see.
+    const bookingProjection =
+      side === 'therapist'
+        ? {
+            roomName: booking.roomName,
+            prospectKey: booking.prospectKey,
+            prospect: booking.prospect,
+            language: booking.language,
+            scheduledFor: booking.scheduledFor,
+          }
+        : {
+            roomName: booking.roomName,
+            therapistName: 'Samuel',          // hardcoded — see Open decisions
+            prospectFirstName: booking.prospect.name.split(' ')[0] ?? '',
+            language: booking.language,
+            scheduledFor: booking.scheduledFor,
+          };
+
+    return NextResponse.json(
+      {token, wsUrl: getLiveKitWsUrl(), roomName: booking.roomName, booking: bookingProjection},
+      {headers: cors},
+    );
+  }
+  ```
 - **Explanation:**
-  - `parsePhaseCondition` looks at each note block in the phase for a matching `[CONDITION: var=value]` line. Returns `{ var, value }` or `null`.
-  - The render skips the entire section when the phase has a condition that doesn't match `cleaned[var]`.
-  - `blocksWithoutConditionMarker` filters the marker note out of the visible blocks so the rep doesn't see `[CONDITION: …]` in the rendered script.
-  - The IntersectionObserver `useEffect` is unchanged. Phases skipped by the filter aren't in the DOM, so the scroll observer naturally ignores them — no extra logic needed.
+  - CORS opens only for `samwise.life` so the landing's join page can POST cross-origin without exposing the route to arbitrary origins.
+  - Side-conditional identity, projection, and egress kickoff.
+  - Egress failure is non-fatal — a missing recording is bad, a failed call is worse.
+
+### Phase 4 — VideoCallExperience component (samwise-app, reused by both surfaces in spirit)
+
+#### Step 4.1 — New `components/demo-call/VideoCallExperience.tsx`
+
+- **In-file location:** new file.
+- **What it is:** the canonical client wiring for a two-human LiveKit video room. Mirrors `RitualCallExperience` but: (a) publishes camera + mic, not just mic; (b) attaches remote video tracks to `<video>` elements; (c) mic is open by default with a mute toggle (NOT push-to-talk); (d) renders a self-view PiP; (e) takes an `initResponse` instead of fetching itself (the parent page does the booking-aware fetch).
+- **Code (full file — long but no surprises if you've read RitualCallExperience):**
+  ```tsx
+  'use client';
+
+  import {useCallback, useEffect, useRef, useState} from 'react';
+  import {
+    Room,
+    RoomEvent,
+    Track,
+    createLocalTracks,
+    type LocalTrack,
+    type RemoteParticipant,
+    type RemoteTrack,
+    type RemoteTrackPublication,
+  } from 'livekit-client';
+
+  type Phase = 'connecting' | 'active' | 'peer-waiting' | 'ended' | 'error';
+
+  export interface VideoCallInit {
+    token: string;
+    wsUrl: string;
+    roomName: string;
+  }
+
+  export interface VideoCallExperienceProps {
+    init: VideoCallInit;
+    /** Optional data-event listener — used by the user-side variables panel. */
+    onDataMessage?: (msg: unknown) => void;
+    /** Optional ref-out so the parent can publish data events from elsewhere. */
+    onRoomReady?: (room: Room) => void;
+    /** Wall-clock hard cap in ms after which the client force-disconnects. */
+    hardCapMs?: number; // default 75 * 60 * 1000 (75 min — 30 over the 45-min slot)
+    /** Called when the user clicks "End call" or the cap fires. */
+    onEnded?: () => void;
+  }
+
+  export function VideoCallExperience(props: VideoCallExperienceProps) {
+    const {init, onDataMessage, onRoomReady, onEnded} = props;
+    const hardCapMs = props.hardCapMs ?? 75 * 60 * 1000;
+
+    const [phase, setPhase] = useState<Phase>('connecting');
+    const [micOn, setMicOn] = useState(true);
+    const [camOn, setCamOn] = useState(true);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+    const roomRef = useRef<Room | null>(null);
+    const localVideoRef = useRef<HTMLVideoElement | null>(null);
+    const remoteContainerRef = useRef<HTMLDivElement | null>(null);
+    const startingRef = useRef(false);
+    const hardCapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onDataMessageRef = useRef(onDataMessage);
+    useEffect(() => { onDataMessageRef.current = onDataMessage; }, [onDataMessage]);
+
+    // Tear down on unmount.
+    useEffect(() => () => {
+      const r = roomRef.current;
+      if (r) { r.removeAllListeners(); void r.disconnect(); }
+      roomRef.current = null;
+      if (hardCapTimerRef.current) clearTimeout(hardCapTimerRef.current);
+    }, []);
+
+    // Auto-mute when tab hidden (privacy contract — same as RitualCallExperience).
+    useEffect(() => {
+      if (phase !== 'active' && phase !== 'peer-waiting') return;
+      const onVis = () => {
+        if (document.visibilityState === 'hidden') {
+          void roomRef.current?.localParticipant.setMicrophoneEnabled(false);
+          setMicOn(false);
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+      return () => document.removeEventListener('visibilitychange', onVis);
+    }, [phase]);
+
+    const start = useCallback(async () => {
+      if (startingRef.current) return;
+      startingRef.current = true;
+
+      const room = new Room({adaptiveStream: true, dynacast: true});
+      roomRef.current = room;
+
+      const onTrackSubscribed = (
+        track: RemoteTrack,
+        _pub: RemoteTrackPublication,
+        participant: RemoteParticipant,
+      ) => {
+        const el = track.attach() as HTMLMediaElement;
+        el.autoplay = true;
+        if (track.kind === Track.Kind.Video) {
+          (el as HTMLVideoElement).playsInline = true;
+          el.dataset.role = 'remote-video';
+        } else if (track.kind === Track.Kind.Audio) {
+          el.dataset.role = 'remote-audio';
+        }
+        el.dataset.participant = participant.identity;
+        remoteContainerRef.current?.appendChild(el);
+      };
+      const onTrackUnsubscribed = (track: RemoteTrack) => {
+        track.detach().forEach((el) => el.remove());
+      };
+      const onParticipantConnected = () => setPhase('active');
+      const onParticipantDisconnected = () => {
+        // Peer left. Stay connected so a rejoin works without re-init.
+        if (room.remoteParticipants.size === 0) setPhase('peer-waiting');
+      };
+      const onDisconnect = () => setPhase('ended');
+      const onData = (payload: Uint8Array) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const parsed = JSON.parse(text);
+          onDataMessageRef.current?.(parsed);
+        } catch {
+          // Bad payload — ignore.
+        }
+      };
+
+      room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+      room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+      room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
+      room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+      room.on(RoomEvent.Disconnected, onDisconnect);
+      room.on(RoomEvent.DataReceived, onData);
+
+      try {
+        await room.connect(init.wsUrl, init.token);
+        const localTracks: LocalTrack[] = await createLocalTracks({audio: true, video: true});
+        await Promise.all(localTracks.map((t) => room.localParticipant.publishTrack(t)));
+        // Self-view: attach local video to local <video>.
+        const localVideo = localTracks.find((t) => t.kind === Track.Kind.Video);
+        if (localVideo && localVideoRef.current) {
+          localVideo.attach(localVideoRef.current);
+        }
+        try { await room.startAudio(); } catch { /* user can re-trigger */ }
+
+        // Wall-clock hard cap.
+        hardCapTimerRef.current = setTimeout(() => {
+          console.warn('[demo-call] wall-clock cap reached, ending call');
+          endCall();
+        }, hardCapMs);
+
+        if (room.remoteParticipants.size > 0) setPhase('active');
+        else setPhase('peer-waiting');
+
+        onRoomReady?.(room);
+      } catch (err) {
+        console.error('connect failed', err);
+        setErrorMsg(err instanceof Error ? err.message : 'Could not connect.');
+        setPhase('error');
+        void room.disconnect();
+        roomRef.current = null;
+      } finally {
+        startingRef.current = false;
+      }
+    }, [init, hardCapMs, onRoomReady]);
+
+    useEffect(() => { void start(); }, [start]);
+
+    const toggleMic = useCallback(async () => {
+      const room = roomRef.current;
+      if (!room) return;
+      const next = !micOn;
+      await room.localParticipant.setMicrophoneEnabled(next);
+      setMicOn(next);
+    }, [micOn]);
+
+    const toggleCam = useCallback(async () => {
+      const room = roomRef.current;
+      if (!room) return;
+      const next = !camOn;
+      await room.localParticipant.setCameraEnabled(next);
+      setCamOn(next);
+    }, [camOn]);
+
+    const endCall = useCallback(() => {
+      const room = roomRef.current;
+      if (room) {
+        room.removeAllListeners();
+        void room.disconnect();
+      }
+      roomRef.current = null;
+      if (hardCapTimerRef.current) {
+        clearTimeout(hardCapTimerRef.current);
+        hardCapTimerRef.current = null;
+      }
+      setPhase('ended');
+      onEnded?.();
+    }, [onEnded]);
+
+    return (
+      <div className="flex h-full w-full flex-col bg-neutral-950 text-neutral-100">
+        <div ref={remoteContainerRef} className="relative flex-1 [&_video]:absolute [&_video]:inset-0 [&_video]:h-full [&_video]:w-full [&_video]:object-cover [&_audio]:sr-only" />
+        {/* Self-view PiP */}
+        <div className="pointer-events-none absolute right-4 top-4 h-32 w-44 overflow-hidden rounded-md border border-neutral-800 bg-black shadow-lg">
+          <video ref={localVideoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
+        </div>
+        {/* Status overlay */}
+        {phase !== 'active' && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/60">
+            <p className="text-sm text-neutral-300">
+              {phase === 'connecting' && 'Connecting…'}
+              {phase === 'peer-waiting' && 'Waiting for the other side to join…'}
+              {phase === 'ended' && 'Call ended.'}
+              {phase === 'error' && (errorMsg ?? 'Something went wrong.')}
+            </p>
+          </div>
+        )}
+        {/* Controls */}
+        <div className="flex items-center justify-center gap-3 bg-neutral-900 px-4 py-3">
+          <button type="button" onClick={() => void toggleMic()} className="rounded-full bg-neutral-800 px-4 py-2 text-sm hover:bg-neutral-700">
+            {micOn ? 'Mute' : 'Unmute'}
+          </button>
+          <button type="button" onClick={() => void toggleCam()} className="rounded-full bg-neutral-800 px-4 py-2 text-sm hover:bg-neutral-700">
+            {camOn ? 'Camera off' : 'Camera on'}
+          </button>
+          <button type="button" onClick={endCall} className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500">
+            End call
+          </button>
+        </div>
+      </div>
+    );
+  }
+  ```
+- **Explanation:**
+  - State machine matches `RitualCallExperience` shape but adds `peer-waiting` (other person hasn't joined yet) and an `ended` phase.
+  - `createLocalTracks` then `publishTrack` so we can grab the video reference and attach to self-view in one place.
+  - Remote tracks: same attach pattern as RitualCallExperience, but the container's CSS spans the parent so video fills the tile.
+  - `onDataMessage` is the door the user-side variables panel listens on; `onRoomReady` is the door the therapist-side copilot publishes through.
+  - Hard cap defaulted to 75 min (45-min slot + 30-min buffer for overruns). Client-side enforcement is sufficient because BOTH sides have the cap and either side timing out drops the room when both are gone (LiveKit `emptyTimeout`).
+  - All the deliberate-disconnect / re-entrancy / visibility-hidden lessons from `RitualCallExperience` ported over.
+
+### Phase 5 — Therapist page wrapper (samwise-app)
+
+#### Step 5.1 — New `app/demo-call/[bookingId]/page.tsx`
+
+- **In-file location:** new file.
+- **What it does:** server component that just renders the client shell with the `bookingId` from URL. The client shell does the init fetch and renders the 3-column layout.
+- **Code (page.tsx, server):**
+  ```tsx
+  import {DemoCallShell} from '@/components/demo-call/DemoCallShell';
+
+  export const runtime = 'nodejs';
+
+  export default async function DemoCallTherapistPage({
+    params,
+  }: {
+    params: Promise<{bookingId: string}>;
+  }) {
+    const {bookingId} = await params;
+    return <DemoCallShell bookingId={bookingId} />;
+  }
+  ```
+
+#### Step 5.2 — New `components/demo-call/DemoCallShell.tsx`
+
+- **In-file location:** new file.
+- **What it does:** the 3-column layout (video left, variables-table middle, script-pane right). Fetches `/api/demo-call/init`, renders `<VideoCallExperience>` in the left column, renders the existing `<CopilotPage>` machinery wrapped to skip its own URL gate and auto-prefill from `booking.prospectKey`.
+- **Note:** the existing `app/copilot/page.tsx` does both URL gating AND the working surface. To reuse it cleanly inside DemoCallShell, refactor: extract the post-load surface (the `grid h-screen grid-cols-[...]` block at the bottom) into a new exported component `<CopilotSurface>` with props for `script`, `state`, `setState`, `docUrl`. The original `page.tsx` continues to render `<CopilotSurface>` after its load. DemoCallShell renders `<CopilotSurface>` directly, having loaded the script via `loadCallScript(DEFAULT_DEMO_SCRIPT_DOC_URL)` on mount and pre-filled from `booking.prospectKey`.
+- **Code (DemoCallShell.tsx, abbreviated — refactor + reuse):**
+  ```tsx
+  'use client';
+
+  import {useEffect, useRef, useState} from 'react';
+  import {Room} from 'livekit-client';
+  import {VideoCallExperience, type VideoCallInit} from './VideoCallExperience';
+  import {CopilotSurface} from '@/app/copilot/copilot-surface'; // extracted in Step 5.3
+  import {
+    DEFAULT_DEMO_SCRIPT_DOC_URL,
+    DEMO_CALL_VARIABLES,
+  } from '@/app/copilot/demo-call-config';
+  import {loadCallScript, type LoadedScript} from '@/lib/copilot/load-script';
+  import {loadQualification} from '@/lib/copilot/load-qualification';
+  import {makeEmptyState, type SessionState} from '@/lib/copilot/session-storage';
+  import {createVariableBroadcaster, type VariableBroadcaster} from '@/lib/demo-call/broadcast';
+
+  interface InitResponse {
+    token: string;
+    wsUrl: string;
+    roomName: string;
+    booking: {
+      roomName: string;
+      prospectKey: string;
+      prospect: {name: string; email: string; phone: string};
+      language: 'en' | 'es';
+      scheduledFor: string;
+    };
+  }
+
+  export function DemoCallShell({bookingId}: {bookingId: string}) {
+    const [init, setInit] = useState<InitResponse | null>(null);
+    const [script, setScript] = useState<LoadedScript | null>(null);
+    const [state, setState] = useState<SessionState | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const broadcasterRef = useRef<VariableBroadcaster | null>(null);
+
+    // Single mount-time effect: init + load script + pre-fill from qualification.
+    useEffect(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const res = await fetch('/api/demo-call/init', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bookingId, side: 'therapist'}),
+          });
+          if (!res.ok) throw new Error((await res.json()).error ?? 'Init failed');
+          const initData: InitResponse = await res.json();
+          if (cancelled) return;
+          setInit(initData);
+
+          const loaded = await loadCallScript(DEFAULT_DEMO_SCRIPT_DOC_URL);
+          if (loaded.scriptType !== 'demo') throw new Error('Loaded non-demo script');
+          if (cancelled) return;
+          setScript(loaded);
+
+          const fresh = makeEmptyState(DEMO_CALL_VARIABLES);
+          // Pre-fill from qualification by prospectKey.
+          const q = await loadQualification(initData.booking.prospectKey);
+          if (q.ok && !cancelled) {
+            // Inline the same fill loops as copilot/page.tsx handleLoadQualification.
+            // (Extract into a shared helper if duplication grows uncomfortable.)
+            fresh.qualificationProspectKey = q.qualification.prospectKey;
+            // ... (mirror QUALIFICATION_TO_DEMO_FIELDS + DERIVED_PREFILLS) ...
+          }
+          setState(fresh);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Could not start the call');
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [bookingId]);
+
+    const handleRoomReady = (room: Room) => {
+      broadcasterRef.current = createVariableBroadcaster(room);
+    };
+
+    // When state.cleaned changes for a userVisible variable, broadcast.
+    // (Implementation detail: subscribe to setState wrapper inside CopilotSurface
+    // via a callback prop, OR poll cleaned via useEffect on its value. Choose
+    // callback-prop pattern to avoid stale closures.)
+
+    if (error) {
+      return <main className="flex h-screen items-center justify-center text-red-600">{error}</main>;
+    }
+    if (!init || !script || !state) {
+      return <main className="flex h-screen items-center justify-center">Loading…</main>;
+    }
+
+    const initForVideo: VideoCallInit = {
+      token: init.token,
+      wsUrl: init.wsUrl,
+      roomName: init.roomName,
+    };
+
+    return (
+      <main className="grid h-screen grid-cols-[minmax(360px,1fr)_minmax(360px,1fr)_2fr]">
+        <section className="relative border-r border-neutral-800">
+          <VideoCallExperience init={initForVideo} onRoomReady={handleRoomReady} />
+        </section>
+        <CopilotSurface
+          script={script}
+          state={state}
+          setState={(updater) => {
+            setState((prev) => {
+              const next = typeof updater === 'function' ? updater(prev!) : updater;
+              if (next && broadcasterRef.current) {
+                broadcasterRef.current.diffAndPublish(prev?.cleaned ?? {}, next.cleaned, DEMO_CALL_VARIABLES);
+              }
+              return next;
+            });
+          }}
+          docUrl={DEFAULT_DEMO_SCRIPT_DOC_URL}
+        />
+      </main>
+    );
+  }
+  ```
+- **Note:** the broadcaster wraps `setState` with a diff-and-publish wrapper so any cleaned-value change for a `userVisible` variable goes out over DataChannel. See Phase 6.
+
+#### Step 5.3 — Extract `CopilotSurface` from `app/copilot/page.tsx`
+
+- **In-file location:** create `samwise-app/app/copilot/copilot-surface.tsx`. Move the post-load JSX (the `grid h-screen grid-cols-[minmax(380px,1fr)_2fr]` block — lines 322–378 of `page.tsx`) into an exported `<CopilotSurface>` component, plus the `qualifyIdentifier` / `handleLoadQualification` UI block (lines 322–360). Original `page.tsx` becomes a thin wrapper that renders the URL gate, loads the script, and on success renders `<CopilotSurface>`.
+- **Should not be modified:** any of the cleaning / DERIVED_PREFILLS / suggestion logic. This is a pure JSX extraction with prop drilling.
+- **Why:** so `DemoCallShell` can reuse the same surface without duplicating the cleaning + pre-fill logic. Single source of truth.
+
+### Phase 6 — DataChannel broadcaster (samwise-app)
+
+#### Step 6.1 — New `lib/demo-call/broadcast.ts`
+
+- **In-file location:** new file.
+- **Code:**
+  ```ts
+  import type {Room} from 'livekit-client';
+  import type {DemoCallVariable} from '@/app/copilot/demo-call-config';
+
+  export interface VariableBroadcaster {
+    diffAndPublish: (
+      prevCleaned: Record<string, string>,
+      nextCleaned: Record<string, string>,
+      variables: DemoCallVariable[],
+    ) => void;
+  }
+
+  export function createVariableBroadcaster(room: Room): VariableBroadcaster {
+    const encoder = new TextEncoder();
+    return {
+      diffAndPublish(prev, next, variables) {
+        for (const v of variables) {
+          if (!v.userVisible) continue;
+          const before = prev[v.name] ?? '';
+          const after = next[v.name] ?? '';
+          if (before === after) continue;
+          const payload = encoder.encode(
+            JSON.stringify({
+              type: 'demo-call:variable_update',
+              name: v.name,
+              value: after,
+            }),
+          );
+          void room.localParticipant.publishData(payload, {reliable: true});
+        }
+      },
+    };
+  }
+  ```
+
+### Phase 7 — `userVisible` flag (samwise-app)
+
+#### Step 7.1 — Extend `DemoCallVariable` + mark fields
+
+- **In-file location:** `samwise-app/app/copilot/demo-call-config.ts`.
+- **Should not be modified:** any existing variable's other fields.
+- **Add to the `DemoCallVariable` interface:**
+  ```ts
+  /** When true, cleaned value is broadcast to the user-side variables panel
+   * in /demo-call/[id]. Default false — most variables are rep-only. */
+  userVisible?: boolean;
+  ```
+- **Mark these variables `userVisible: true`** (the ones that mirror what the user already saw on `/qualify` — extending the "they watch their notes get rewritten" UX into the demo call):
+  - `prospect_name`
+  - `behaviour_to_change`
+  - `core_motivation`
+  - `life_stage_context`
+  - `problem_duration_self_reported`
+  - `symbolic_anchor_description`
+  - `alternatives_tried`
+  - `why_alternatives_failed`
+- **Explicitly NOT user-visible** (sensitive / judgemental / rep-only): `fit_state`, `rep_notes`, `outcome`, `clinical_picture_description`, `grado_de_identificacion`, any future inference fields.
+
+### Phase 8 — User page (samwise-landing)
+
+#### Step 8.1 — New `app/demo-call/[bookingId]/page.tsx`
+
+- **In-file location:** new file.
+- **Code (server):**
+  ```tsx
+  import {CallRoot} from './call-root';
+
+  export const dynamic = 'force-dynamic';
+
+  export default async function DemoCallUserPage({
+    params,
+  }: {
+    params: Promise<{bookingId: string}>;
+  }) {
+    const {bookingId} = await params;
+    return <CallRoot bookingId={bookingId} />;
+  }
+  ```
+
+#### Step 8.2 — `call-root.tsx` (client, pre-join lobby OR call-room based on state)
+
+- **In-file location:** `samwise-landing/app/demo-call/[bookingId]/call-root.tsx`.
+- **Code:**
+  ```tsx
+  'use client';
+  import {useState} from 'react';
+  import {PreJoin} from './pre-join';
+  import {CallRoom} from './call-room';
+  import type {InitResponse} from './types';
+  import './demo-call.css';
+
+  export function CallRoot({bookingId}: {bookingId: string}) {
+    const [init, setInit] = useState<InitResponse | null>(null);
+
+    if (!init) return <PreJoin bookingId={bookingId} onJoined={setInit} />;
+    return <CallRoom init={init} />;
+  }
+  ```
+
+#### Step 8.3 — `pre-join.tsx` — name confirm + mic/camera grant + Join button
+
+- **In-file location:** `samwise-landing/app/demo-call/[bookingId]/pre-join.tsx`.
+- **Behavior:**
+  - On mount, POST `/api/demo-call/init` (cross-origin to `app.samwise.life`) with `{bookingId, side: 'user'}`.
+  - On 200: show "Hi {prospectFirstName}, your call with Samuel is at {scheduledFor}." plus a "Test mic and camera" link that triggers `navigator.mediaDevices.getUserMedia({audio:true, video:true})` to surface the browser permission prompt early.
+  - On click "Join call", invoke `onJoined(initResponse)`.
+  - On 404/410: warm copy explaining the link is no longer valid + "Back to Samwise" link to `/`.
+- **Visual register:** consistent with `/qualify`'s aesthetic (Fraunces for headings, gentle ink color). See `samwise-landing-page` skill for the visual language. Keep it ONE column, narrow, no chrome.
+
+#### Step 8.4 — `call-room.tsx` — video + variables panel
+
+- **In-file location:** `samwise-landing/app/demo-call/[bookingId]/call-room.tsx`.
+- **Behavior:**
+  - Renders a two-pane layout: video tile on the main area (full bleed on mobile, 70% on desktop), `<VariablesPanel>` from `samwise-landing/app/qualify/components/variables-panel.tsx` in a side rail (right on desktop, collapsible drawer on mobile).
+  - Uses the same `VideoCallExperience` from samwise-app — but since the two projects don't share code, we copy the component into `samwise-landing/app/demo-call/[bookingId]/video-call-experience.tsx` for v1. **Trade-off:** code duplication. Justified because the two projects have independent build systems and `livekit-client` versions can drift. Mark as a "extract into a shared package" candidate if maintenance friction surfaces.
+  - Hydrates `<VariablesPanel>` from the DataChannel:
+    ```tsx
+    const [variables, setVariables] = useState<VariablesState>({});
+    const onDataMessage = useCallback((msg: any) => {
+      if (msg?.type === 'demo-call:variable_update' && typeof msg.name === 'string') {
+        setVariables((prev) => ({...prev, [msg.name]: String(msg.value ?? '')}));
+      }
+    }, []);
+    <VideoCallExperience init={init} onDataMessage={onDataMessage} ... />
+    <VariablesPanel lang={init.booking.language} variables={variables} />
+    ```
+
+#### Step 8.5 — `demo-call.css`
+
+- Mirror `qualify.css` register. Variables panel uses the existing `.qualify-notes-*` classes (or copy-and-rename to `.demo-notes-*` if we want visual divergence — start with reuse).
+
+### Phase 9 — Sidebar entry in samwise-app
+
+#### Step 9.1 — Add a `/demo-call` discovery entry to `app/page.tsx`
+
+- The sidebar today has Ritual call. The therapist needs a way to land on `/demo-call/[bookingId]` without typing the URL — for v1, the simplest path is a "Demo calls" sidebar entry that shows `demoBookings` with status `scheduled` or `in_progress` from today, each clickable.
+- **Deferred to v1.5 if the list view adds scope pressure.** For v1, the therapist gets the booking URL from the same Cal email the prospect gets (Samuel will receive the Cal confirmation as the event organizer). No sidebar entry needed for v1.
+- Document as a TODO in the after-implementation step.
 
 ---
 
 ## Testing phase
 
-### Local test (foreground, by me after approval)
-1. Apply Phase B code changes.
-2. Start dev server.
-3. Load `/copilot`.
-4. Without loading any qualification or typing anything: confirm `fit_state` shows `qualified` in the variables-table select. Phases 1–14 visible, scientific-evidence (now Phase 15) visible. Rebound phases (16, 17) HIDDEN.
-5. Flip `fit_state` to `still_disqualified` in the variables-table. Phases 6–15 hide. Phases 16, 17 appear. Phase 5 (with new 5c sub-section) stays visible. Phases 1–5 stay visible.
-6. Visually confirm no `[CONDITION: ...]` marker line is rendered in the script pane.
+### Local test (foreground)
+
+1. Implement Phases 1, 3–7. Run `pnpm dev` in `samwise-app`. Manually insert a `demoBookings/test-1` doc in Firestore via the Firebase console with all fields populated.
+2. Open `localhost:3000/demo-call/test-1` in one browser. Verify the therapist surface loads, video tile shows local camera, copilot pre-fills from a known prospect's qualification.
+3. Run `pnpm dev` in `samwise-landing`. Open `localhost:3001/demo-call/test-1` in a second browser (or incognito).
+4. Verify cross-origin init POST succeeds (CORS configured). Verify pre-join shows the prospect's name + scheduledFor.
+5. Click Join. Verify both browsers connect to the same room, both see each other's video, audio is bidirectional.
+6. In the therapist browser, type a value into a `userVisible: true` variable. Wait for the 1.5s debounce-and-clean cycle. Verify the value lands in the user browser's `<VariablesPanel>` as a card.
+7. In the therapist browser, type into a NON-userVisible variable (e.g. `rep_notes`). Verify it does NOT appear on the user side.
+8. Test mute/camera-off toggles. Test tab-hidden auto-mute (switch tab → check the LiveKit dashboard for mic publish state).
+9. Click "End call" on either side. Verify the room closes within `emptyTimeout` (default 30s).
+10. Re-join from the user side: verify a fresh egress does NOT start (egressId already on the booking).
 
 ### Integration test
-- After Step A is applied to the live Doc, reload the script in /copilot (clear localStorage, paste the Doc URL again). Confirm the same filter behaviour against the real parsed script.
+
+1. Deploy `calDemoBookingWebhook` to Firebase. Use `curl` with a valid HMAC to POST a fake `BOOKING_CREATED` payload. Verify the doc appears in `demoBookings`.
+2. Configure the Cal webhook to point at the deployed URL.
+3. Book a real test slot via Cal (use a personal email). Verify the doc appears.
+4. Open the email's `samwise.life/demo-call/{uid}` link. Verify pre-join + join works against the real deployed app.
+5. Locate the egress recording in LiveKit's storage UI (or LiveKit Cloud dashboard's Egress tab). Verify the MP4 plays with both video and audio.
 
 ### Update README
-None — internal copilot changes, no public surface.
+
+- Add a one-line note to `samwise-app/context-for-code-agent.md` describing the new `/demo-call/[bookingId]` route and what it depends on.
+- Add a sibling note in `samwise-landing/context-for-code-agent.md`.
 
 ---
 
 ## After implementation
 
 ### Update `samwise-app/context-for-code-agent.md`
-Append one line under `/copilot` describing the new condition-marker convention and `fit_state` variable. Brief — the deep detail lives in the `samwise-session-copilot` skill.
 
-### Update `samwise-session-copilot` skill
-Add a short section documenting:
-- The `[CONDITION: var=value]` marker convention (placement, parser semantics, filtering of the marker from visible output).
-- The `defaultValue` field on `DemoCallVariable` and `makeEmptyState`'s honouring of it.
-- The `fit_state` variable as the v1 condition driver, and the qualified/still_disqualified branches.
-- Note that variable-driven phase-branching is now part of the script-pane's responsibility — future per-register branches would compose with this same mechanism.
+Append under "Module Overview":
+- `/demo-call/[bookingId]` — therapist-side video call surface. 3-column: video (left), copilot variables + script (middle/right). Pre-fills from qualification by `booking.prospectKey`. Broadcasts cleaned variables marked `userVisible: true` over LiveKit DataChannel to the user-side page on samwise-landing. Recording is server-started by `/api/demo-call/init` on therapist join.
 
-### Update `samwise-script-work` skill
-Append to Rule 7's table that the canonical Demo Doc now uses neutralized phrasing for the three rejected terms, with `{{behaviour_to_change}}`-style slots where applicable. Note that the rule's status is no longer "interim" for the Demo script.
+### Update `samwise-landing/context-for-code-agent.md`
 
-### Mark task DONE
-User marks the task DONE in the master Vibe doc Projects tab once Step A is applied in Google Docs and Step B is deployed.
+Append under "Module Overview":
+- `/demo-call/[bookingId]` — user-side video call surface. Pre-join lobby → video tile + live `<VariablesPanel>` hydrated from DataChannel events sent by the therapist's copilot. Bookings live in samwise-backend's `demoBookings` collection, created by the `calDemoBookingWebhook` cloud function.
+
+### Update the `samwise-app-livekit-integration` skill
+
+Add a new section "Native video flows (demo-call)" capturing:
+- The two-human-room pattern (no agent dispatch).
+- The `VideoCallExperience` component as the canonical reference for human-to-human video.
+- The DataChannel `demo-call:variable_update` event shape.
+- The `userVisible` flag on `DemoCallVariable`.
+- The server-side egress kickoff at therapist init.
+- The fact that the same component is duplicated in samwise-landing — this is the v1 trade-off; extract to a shared package if duplication friction grows.
+
+### Update the `samwise-session-copilot` skill
+
+Add a short section: when /copilot is rendered inside `<DemoCallShell>`, the state updates are wrapped with a DataChannel broadcaster — see Phase 6. Note the extracted `<CopilotSurface>` component.
+
+### Mark task DONE in master Vibe doc
+
+Manual user step.
 
 ---
 
-## Open decisions (flag if user wants to revisit before implementation)
+## Open decisions (revisit at v1.5 or before going live with real prospects)
 
-1. **Variable naming.** `fit_state` with values `qualified | still_disqualified`. Alternatives: `post_demo_fit`, `fit_tag`. Sticking with `fit_state` because it's short and the values are self-explanatory.
-2. **Numbering scheme for rebound phases.** Using 16 and 17 after renumbering the misnumbered "Phase 1 → Phase 15" at the end of the Doc. Alternative: don't fix the typo, use 15 and 16 for rebound (leaves the scientific-evidence misnumber in place). Sticking with the fix because we're already editing the Doc heavily.
-3. **`align` beat in Phase 16.** Currently a SAY block with a placeholder for the worldview reference. Could be a note-block instruction instead ("Reference their worldview verbatim if it came up earlier; otherwise skip"). Sticking with SAY because the rep adapts the phrasing live anyway, and rendering it as a SAY box visually marks that something IS said here when applicable.
-4. **Phase 5c uses no `[SAY]` block.** It's pure rep guidance. The condition marker convention is on the next phase, not this one. Phase 5c always shows, regardless of fit_state.
+1. **Therapist auth.** `bookingId`-as-credential works because Cal generates unguessable UIDs and the only person with the URL is the prospect. But anyone who scrapes a prospect's email gets the URL too. Before non-test users, add Clerk session check on the therapist route (samwise-app gets auth; samwise-landing's user route stays anonymous because the user has no account).
+2. **Multi-therapist routing.** Today: hardcoded `therapist-samuel`. Future: a `therapists` Firestore collection + a per-therapist Cal event type, with the webhook routing to `therapistId` based on event slug or organizer email.
+3. **`/demo-call` sidebar list view in samwise-app.** Currently the therapist navigates via the Cal email's organizer link. Add a sidebar list of today's bookings once Samuel says it's annoying.
+4. **Status field maintenance.** `status: 'completed'` is never written in v1 (no agent or job watching for room close). Either add a LiveKit webhook ("room_finished") or a scheduled GC. Defer until a UI consumes the field.
+5. **Reschedule / cancel webhook handling.** Cal also sends `BOOKING_RESCHEDULED` and `BOOKING_CANCELLED`. Currently ignored (200, no-op). Add when needed — likely once a "today's bookings" list exists and shows stale entries.
+6. **Recording storage path.** Step 0.2 deferred the choice (LiveKit managed vs BYO bucket) to test time. Lock in once Phase 2 testing surfaces what actually works at the project's LiveKit tier.
+7. **Per-recording playback UI.** Today: the egressId is stored, and Samuel pulls signed URLs by hand. Build a "View recording" affordance on the booking once Samuel asks.
+8. **Co-watching / silent observer.** A second therapist as a silent observer (for training) would be a new participant type: token with `canSubscribe: true, canPublish: false`. Currently out of scope.
+
+---
+
+## Risk register
+
+| Risk | Mitigation |
+|---|---|
+| Cal webhook variable name `{{uid}}` may differ across Cal versions | Verify in Step 0.1 before going live. If different, only the email template needs to change — webhook handler uses the parsed `payload.uid`. |
+| LiveKit Composite Egress may not be available on the project's tier | Step 0.2 verifies. Fallback: disable recording in v1; deploy without the egress call. |
+| CORS misconfig between samwise-landing and samwise-app on `/api/demo-call/init` | Test in Step 5 of local test. ALLOWED_ORIGINS list is explicit; preview deployments use a different host and will need their preview URL added. |
+| Recording-without-consent legal risk | User explicitly accepted for test users. Add consent UX before public launch. |
+| Hard cap of 75 min still leaks if a client crashes and the room stays open | LiveKit `emptyTimeout` (default 30s) handles this — when both clients are gone (including via crash), LiveKit closes the room. Worst-case orphan recording cost is ~1 min of accidental tracks. |
+| `RoomComposite` egress with one missing participant produces a half-black frame | Acceptable for v1; LiveKit's composer handles single-participant gracefully (renders one tile fullscreen). |
+| Duplicate `VideoCallExperience` code between samwise-app and samwise-landing drifts | Document as "extract to shared package" candidate. v1 ships duplicate. |
+
+---
+
+## Phase 10 — Samwise-branded booking page with Cal embed (added mid-implementation)
+
+Samuel sends qualified prospects (post-Breakthrough Call) a Samwise-branded URL to book the demo, instead of a raw cal.com link. `/book` opens the Cal element-click modal in place. Aesthetic matches `/qualify` (Fraunces italic lead, Manrope small-caps sub, hairline gold-dash CTA).
+
+### Files
+
+```
+samwise-landing/app/book/
+├── page.tsx          # NEW server, thin
+├── book-client.tsx   # NEW client — Cal embed init + CTA button
+└── book.css          # NEW aesthetic (local brand tokens; mirrors /qualify)
+```
+
+### Steps
+
+- **10.1** `page.tsx` — thin server component, renders `<BookClient />`.
+- **10.2** `book-client.tsx` — client component. Injects Cal `embed.js` on mount, calls `Cal("init", "demo", { origin })`, configures via `Cal.ns.demo("ui", { ... })`. Renders centered editorial layout with a `data-cal-link="samuel-giraldo-concha-yqvtot/demo"` + `data-cal-namespace="demo"` CTA button so embed.js attaches its click handler. Bilingual via `?lang=es` query param (default `en` — no picker, Samuel sends the right URL).
+- **10.3** `book.css` — local brand tokens + literal `'Fraunces' / 'Manrope'` stacks (same convention as `demo-call.css`).
+
+### Email follow-up — defensive Samwise-branded send (conditional)
+
+- **10.4** (deferred — execute only if test booking confirms Cal doesn't substitute `{{uid}}` in the location field): extend `calDemoBookingWebhook` to write a `mail/{auto-id}` doc with subject *"Your call link"* and body containing `https://samwise.life/demo-call/{calBookingUid}`. Firebase Trigger Email picks it up automatically (per memory `reference_firebase_trigger_email_setup.md`). Mirrors the post-call confirmation email shape from `extractQualification`.
+
+---
+
+## Phase 11 — Walk-in `/meet` flow (replaces Cal as the entry point)
+
+Cal kept fighting us (no `{{uid}}` templating; default-email-disable + our webhook-email path didn't deliver in test). Pivot: drop the booking abstraction entirely. One permanent URL `samwise.life/meet`, lobby asks for name + email + language, on submit the prospect joins a freshly-minted LiveKit room and Samuel gets an email notification with a link to join that room.
+
+### Architecture
+
+```
+samwise.life/meet
+  └─ lobby (collect name/email/language)
+     └─ submit → POST app.samwise.life/api/walk-in/init
+                   ├─ mints LiveKit token
+                   ├─ writes walkIns/{prospectKey}-{ts} to Firestore
+                   ├─ writes mail/{auto-id} → Firebase Trigger Email
+                   │     → "Someone's waiting for you" email to Samuel
+                   │       with link app.samwise.life/meet/{walkInId}
+                   └─ returns { token, wsUrl, roomName, walkInId }
+     └─ in-page transition → call-room (video + variables panel)
+                              user sees "Samuel will be with you shortly"
+                              until you join
+
+app.samwise.life/meet/{walkInId}
+  └─ Samuel clicks the email link
+     └─ WalkInShell (mirrors DemoCallShell but reads walkIns/{id})
+        ├─ VideoCallExperience joins same roomName
+        ├─ Copilot pre-fills from qualification by prospectKey (if exists)
+        └─ DataChannel broadcaster wired as before
+```
+
+### Files
+
+```
+samwise-app/
+├── lib/walk-in/walkin.ts                  # NEW — Firestore reader/writer
+├── app/api/walk-in/init/route.ts          # NEW — mints, writes walkIn, writes mail/, returns
+├── components/walk-in/WalkInShell.tsx     # NEW — mirrors DemoCallShell
+└── app/meet/[walkInId]/page.tsx           # NEW — Samuel's surface
+
+samwise-landing/
+├── components/call/
+│   ├── VideoCallExperience.tsx            # NEW (extracted from demo-call/[bookingId]/)
+│   └── CallRoomLayout.tsx                 # NEW (extracted — video tile + variables panel)
+├── app/meet/
+│   ├── page.tsx                           # NEW (server)
+│   ├── meet-root.tsx                      # NEW (client orchestrator: lobby OR call-room)
+│   ├── lobby.tsx                          # NEW (name + email + language form)
+│   └── meet.css                           # NEW (mirrors qualify register)
+└── app/demo-call/[bookingId]/
+    ├── video-call-experience.tsx          # DELETED — replaced by import
+    └── call-room.tsx                      # MODIFIED — imports shared CallRoomLayout
+```
+
+### Cal-related code disposition
+
+Stays in place but goes dormant — `calDemoBookingWebhook`, `/api/demo-call/init`, `/demo-call/[bookingId]`, `/book` Cal embed all keep working IF a Cal booking ever fires the webhook. Easy to revive later. Easy to delete if you commit to walk-in-only.
+
+### Notification email shape
+
+Helper lives in samwise-app's API route (not in cloud-functions — samwise-app already writes to Firestore via firebase-admin; no new CF deploy needed). Subject *"Someone's waiting for you on Samwise"*, body: prospect name + email + language + a hairline-gold-dash link to `app.samwise.life/meet/{walkInId}`.
+
+### Testing
+
+- Open `localhost:3001/meet` → lobby form. Submit with a real email.
+- Check `firebase functions:log` and Firestore — `walkIns/{key}-{ts}` doc appears; `mail/{auto-id}` doc appears.
+- Email arrives at `samuelgiraldoconcha@gmail.com` within ~30s.
+- Click the email link → `localhost:3000/meet/<id>` opens, copilot loads, video joins same room as the lobby tab.
+
+### Testing
+
+- Open `localhost:3001/book` → CTA visible, click → Cal modal opens with the `demo` event type.
+- Book a test slot. Confirm `demoBookings/{uid}` appears in Firestore (Phase 2 webhook fires).
+- Read the confirmation email. If `{{uid}}` substituted in the location → done. If literal → execute Step 10.4.

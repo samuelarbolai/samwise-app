@@ -80,6 +80,14 @@ export interface DemoCallVariable {
    * into a spoken phase. Used for the Phase 1.5 worldview confirmation
    * helper. UI renders only the suggestion panel; no raw input box. */
   repHelperOnly?: boolean
+  /** When true, the cleaned value is broadcast to the user-side variables
+   * panel in /demo-call/[id] over LiveKit DataChannel (event
+   * `demo-call:variable_update`). Default false — most variables are
+   * rep-only (judgements, internal notes, outcomes). Mirror the user-
+   * visible set in samwise-landing's /qualify VariablesPanel: what the
+   * prospect already watched get captured live there should keep being
+   * watched live during the demo. */
+  userVisible?: boolean
 }
 
 // Pre-filled default Doc URL — the canonical Demo script.
@@ -141,6 +149,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   // not directly substituted, so they come last.
   {
     name: "behaviour_to_change",
+    userVisible: true,
     label: "Behaviour to change",
     phase: "pre-call",
     meaning: "Short verb-phrase form of the behaviour. Used in Step 3 action re-anchor, Step 5 IFS reframe, Phase 1.5 reflection. For the full incident description (used in Step 1 anchor), see behaviour_example below.",
@@ -159,6 +168,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "core_motivation",
+    userVisible: true,
     label: "Core motivation",
     phase: "pre-call",
     meaning: "What they're really trying to unlock.",
@@ -177,6 +187,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "symbolic_anchor_description",
+    userVisible: true,
     label: "Symbolic anchor description",
     phase: "pre-call",
     meaning: "What they draw strength from, in their own words.",
@@ -186,6 +197,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "alternatives_tried",
+    userVisible: true,
     label: "Alternatives tried",
     phase: "pre-call",
     meaning: "What else they've tried.",
@@ -195,6 +207,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "why_alternatives_failed",
+    userVisible: true,
     label: "Why alternatives failed",
     phase: "pre-call",
     meaning: "Why those didn't work.",
@@ -205,6 +218,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "life_stage_context",
+    userVisible: true,
     label: "Life stage context",
     phase: "pre-call",
     meaning: "Where they are right now: work, family, what's loud.",
@@ -214,6 +228,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   {
     name: "problem_duration_self_reported",
+    userVisible: true,
     label: "Problem duration",
     phase: "pre-call",
     meaning: "How long they've been struggling with this.",
