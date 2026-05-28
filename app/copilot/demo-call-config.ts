@@ -34,6 +34,7 @@ export type DemoCallPhase =
   | 5
   | 7
   | 8
+  | 10
   | 14
   | "post-call"
 
@@ -65,6 +66,7 @@ export interface DemoCallVariable {
    * fires (see suggestTriggerVariable). */
   suggestTechnique?:
     | "phase_1_5_worldview_confirmation"
+    | "phase_10_alternatives_failure_reflection"
     | "ifs_reframe"
     | "amplification_two_poles"
     | "synthesis_offer"
@@ -411,6 +413,33 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     options: ["qualified", "still_disqualified"],
     cleanable: false,
     defaultValue: "qualified",
+  },
+
+  // ---- Phase 10 — Eliminate perception of risk ----
+  // DEPRECATED (2026-05-27): Phase 10's spoken text was rewritten into
+  // one continuous SAY block — verdict line → accusation audit (two
+  // universal first-purchase flinches) → refund framing as the direct
+  // answer to those flinches. There is no longer a slot between the
+  // "Antes de hablar de inversión" setup and the one-month guarantee for
+  // a separate reflection line to land. The audit and the guarantee now
+  // answer each other directly.
+  //
+  // Left in place rather than removed because deletion would also require
+  // pruning "phase_10_alternatives_failure_reflection" from the
+  // suggestTechnique union (and the backend's prompt for it). Safe to
+  // delete this entry + the union member + the backend prompt in a
+  // future sweep when nothing references them.
+  {
+    name: "alternatives_failure_reflection_line",
+    label: "Phase 10 — Alternatives failure reflection",
+    phase: 10,
+    meaning:
+      "LLM-generated one-line empathic reflection on why the prospect's prior alternatives didn't work. Read it aloud or adapt to your voice; sits between the 'Antes de hablar de inversión' setup and the one-month guarantee. Empty if no alternatives are on file.",
+    inputKind: "textarea",
+    cleanable: false,
+    repHelperOnly: true,
+    suggestTechnique: "phase_10_alternatives_failure_reflection",
+    suggestTriggerVariable: "qualification_load",
   },
 
   // ---- Phase 14 — Alternatives rebound (live capture of cost vars) ----
