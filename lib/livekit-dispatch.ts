@@ -7,16 +7,20 @@ function requireEnv(name: string): string {
   return v;
 }
 
-// Mints a short-lived access token the browser uses to join `roomName`
-// as the LiveKit participant `identity`. TTL is 10 minutes; the token is
-// only needed for the initial WebRTC handshake.
+// Mints an access token the browser uses to join `roomName` as the
+// LiveKit participant `identity`. TTL must outlive the ENTIRE session,
+// not just the initial handshake: livekit-client reuses this same token
+// for automatic reconnection (signal drop, ICE restart, room cycling via
+// emptyTimeout). A short TTL meant any reconnect after it expired failed
+// with `invalid token` / 401. 3h comfortably covers the longest session
+// here (the demo/walk-in call's 75-min wall-clock hard cap) plus buffer.
 export async function mintRoomAccessToken(args: {
   identity: string;
   roomName: string;
 }): Promise<string> {
   const at = new AccessToken(requireEnv('LIVEKIT_API_KEY'), requireEnv('LIVEKIT_API_SECRET'), {
     identity: args.identity,
-    ttl: '10m',
+    ttl: '3h',
   });
   at.addGrant({
     room: args.roomName,
