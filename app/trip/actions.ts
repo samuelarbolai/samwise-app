@@ -126,6 +126,94 @@ export async function updateEvent(
   revalidatePath(`/trip/${token}`, "layout");
 }
 
+/**
+ * One-shot sync that pushes the 2026-05-29 sheet deltas into an existing
+ * workspace. Idempotent — re-runs are safe (they re-apply the same patch).
+ * Match is by exact title.
+ */
+export async function syncCalendarFromSheet(token: string): Promise<{
+  matched: number;
+  patched: string[];
+}> {
+  type Patch = Partial<EventItem>;
+  const PATCHES: Array<{ titleMatch: string; patch: Patch }> = [
+    {
+      titleMatch: "NYC HealthTech & MedTech Networking",
+      patch: {
+        registrationStatus: "Registered",
+        notes:
+          "Picked over Tech Startups (healthtech peers). MedTech Networking Event.pdf saved.",
+      },
+    },
+    {
+      titleMatch: "Healthcare AI Professionals & Builders Night",
+      patch: {
+        dateKind: "fixed",
+        date: "2026-06-09",
+        day: "Tue",
+        time: "6:00–8:00 PM",
+        picked: true,
+        registrationStatus: "Registered",
+        cadence: undefined,
+        notes:
+          "Approved. Ticket: https://luma.com/e/ticket/evt-Y5ABB54pJ9G5zlk?pk=g-CxeVHnWs1I6x77N. CONFLICT — overlaps MedTech 7:00 PM by 1 hr.",
+      },
+    },
+    {
+      titleMatch: "Bio, Eco & Deep Tech Mixer (Antler/Nucleate/Coeus)",
+      patch: {
+        dateKind: "fixed",
+        date: "2026-06-09",
+        day: "Tue",
+        time: "6:00–8:00 PM",
+        registrationStatus: "Pending approval",
+        link: "https://luma.com/frontierbuildersmixer?tk=ZiXAxn",
+        cadence: undefined,
+        notes:
+          "Applied — pay attention for approval email. Apply link: https://luma.com/frontierbuildersmixer?tk=ZiXAxn",
+      },
+    },
+    {
+      titleMatch: "The Center for Fiction Day Pass",
+      patch: {
+        cost: "$30",
+        registrationStatus: "Registered",
+        notes:
+          "Anytime drop-in; skeleton slot is Fri. Confirmation in Gmail.",
+      },
+    },
+  ];
+
+  const events = await listEvents(token);
+  const ref = workspaceRef(token);
+  const batch = getDb().batch();
+  const patched: string[] = [];
+  let matched = 0;
+
+  PATCHES.forEach(({ titleMatch, patch }) => {
+    const target = events.find((e) => e.title === titleMatch);
+    if (!target) return;
+    matched += 1;
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      cleaned[k] = v === undefined ? deleteField() : v;
+    }
+    batch.update(ref.collection("events").doc(target.id), cleaned);
+    patched.push(target.title);
+  });
+
+  await batch.commit();
+  revalidatePath(`/trip/${token}`, "layout");
+  return { matched, patched };
+}
+
+function deleteField() {
+  // Lazy import so this file stays free of admin-SDK imports until needed.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { FieldValue } = require("firebase-admin/firestore");
+  return FieldValue.delete();
+}
+
 export async function listRoutes(token: string): Promise<RouteBlueprint[]> {
   await ensureTripWorkspace(token);
   const snap = await workspaceRef(token).collection("routes").get();

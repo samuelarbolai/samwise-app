@@ -11,6 +11,7 @@ import {
 import { VariablesTable } from "@/app/copilot/variables-table"
 import { ScriptPane } from "@/app/copilot/script-pane"
 import { QualifyPrefillRow } from "@/app/copilot/qualify-prefill-row"
+import { StoryControl } from "@/app/copilot/story-control"
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
   DEMO_CALL_VARIABLES,
@@ -52,6 +53,7 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
   const [error, setError] = useState<string | null>(null)
 
   const broadcasterRef = useRef<VariableBroadcaster | null>(null)
+  const [roomReady, setRoomReady] = useState(false)
 
   // setState wrapper publishes diffs over DataChannel when a userVisible
   // variable's cleaned value changes. Same pattern as DemoCallShell.
@@ -148,6 +150,7 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
 
   const handleRoomReady = (room: Room) => {
     broadcasterRef.current = createVariableBroadcaster(room)
+    setRoomReady(true)
   }
 
   if (error) {
@@ -186,6 +189,10 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
         />
       </section>
       <section className="overflow-auto border-r">
+        <StoryControl
+          ready={roomReady}
+          onPublish={(stage) => broadcasterRef.current?.publishVisual(stage)}
+        />
         {/* Manual qualification-load fallback — always available. The
             auto-prefill on mount tries booking.prospect.email; this
             row lets the rep load a different identifier if the

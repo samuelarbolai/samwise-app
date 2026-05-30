@@ -10,7 +10,24 @@ export const REGISTRATION_TYPES = [
 ] as const;
 export type Registration = (typeof REGISTRATION_TYPES)[number];
 
-export type EventDateKind = "fixed" | "anytime" | "recurring" | "outside" | "dead";
+export const REGISTRATION_STATUS_OPTIONS = [
+  "Not started",
+  "Applied",
+  "Pending approval",
+  "Registered",
+  "Confirmed",
+  "Declined",
+] as const;
+export type RegistrationStatus = (typeof REGISTRATION_STATUS_OPTIONS)[number];
+
+export const DATE_KIND_OPTIONS = [
+  "fixed",
+  "anytime",
+  "recurring",
+  "outside",
+  "dead",
+] as const;
+export type EventDateKind = (typeof DATE_KIND_OPTIONS)[number];
 
 export interface EventItem {
   id: string;
@@ -24,6 +41,7 @@ export interface EventItem {
   cost: string;
   tier: Tier;
   registration: Registration;
+  registrationStatus?: RegistrationStatus;
   link?: string;
   notes?: string;
   cadence?: string; // for recurring
