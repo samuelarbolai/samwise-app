@@ -23,7 +23,8 @@ import {
   type RegistrationStatus,
   type Tier,
 } from "../../_types";
-import { syncCalendarFromSheet, updateEvent } from "../../actions";
+import { updateEvent } from "../../actions";
+import { SheetSyncPanel } from "./sheet-sync-panel";
 
 const TIER_LABEL: Record<Tier, string> = {
   T1: "T1 · recovery",
@@ -42,17 +43,35 @@ const REG_STATUS_COLOR: Partial<Record<RegistrationStatus, string>> = {
   Declined: "var(--ash)",
 };
 
+interface SheetConfig {
+  sheetId: string | null;
+  sheetTabName: string | null;
+  lastPushedAt: number | null;
+  serviceAccountEmail: string | null;
+}
+
 interface Props {
   workspace: string;
   events: EventItem[];
+  sheetConfig: SheetConfig;
 }
 
-export function CalendarClient({ workspace, events: initial }: Props) {
+const REG_STATUS_CYCLE: RegistrationStatus[] = [
+  "Not started",
+  "Applied",
+  "Pending approval",
+  "Registered",
+  "Confirmed",
+  "Declined",
+];
+
+export function CalendarClient({ workspace, events: initial, sheetConfig }: Props) {
   const [events, setEvents] = useState(initial);
   const [filter, setFilter] = useState<
     "all" | "picked" | "fixed" | "anytime" | "recurring" | "outside"
   >("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showSheetSync, setShowSheetSync] = useState(false);
   const [, startTransition] = useTransition();
 
   const filtered = useMemo(() => {
@@ -81,18 +100,11 @@ export function CalendarClient({ workspace, events: initial }: Props) {
 
   const grouped = groupByDay(filtered);
 
-  async function handleSheetSync() {
-    if (!confirm("Apply the May 29 sheet sync? This patches matching events in this workspace.")) return;
-    try {
-      const result = await syncCalendarFromSheet(workspace);
-      alert(
-        `Matched ${result.matched} / 4 sheet rows.\nPatched:\n${result.patched.join("\n") || "(none)"}\n\nReloading…`,
-      );
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-      alert("Sync failed. See console.");
-    }
+  function cycleRegistrationStatus(e: EventItem) {
+    const current = e.registrationStatus ?? "Not started";
+    const idx = REG_STATUS_CYCLE.indexOf(current);
+    const next = REG_STATUS_CYCLE[(idx + 1) % REG_STATUS_CYCLE.length];
+    patch(e.id, { registrationStatus: next });
   }
 
   return (
@@ -112,91 +124,111 @@ export function CalendarClient({ workspace, events: initial }: Props) {
         )}
         <button
           type="button"
-          onClick={handleSheetSync}
+          onClick={() => setShowSheetSync(true)}
           className="filter-pill"
-          title="One-shot: pulls May 29 sheet deltas into this workspace"
+          title="Push app → sheet, or pull May 29 deltas"
           style={{
             marginLeft: "auto",
             borderStyle: "dashed",
           }}
         >
-          ⟳ Sync from sheet (May 29)
+          ⇅ Sheet sync
         </button>
       </div>
 
       {grouped.map(([groupKey, items]) => (
         <DbBox key={groupKey} title={groupKey}>
           <ul className="event-list">
-            {items.map((e) => (
-              <li key={e.id} className="event-list__item">
-                <button
-                  type="button"
-                  className={`event-pick ${e.picked ? "event-pick--on" : ""}`}
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    patch(e.id, { picked: !e.picked });
-                  }}
-                  aria-label={e.picked ? "Unpick" : "Pick"}
-                >
-                  {e.picked ? "✓" : "·"}
-                </button>
-                <div className="event-list__time">{e.time ?? "—"}</div>
-                <button
-                  type="button"
-                  className="event-list__body"
-                  onClick={() => setSelectedId(e.id)}
-                >
-                  <strong>{e.title}</strong>
-                  <div className="event-list__loc">{e.location}</div>
-                  <div className="event-list__meta">
-                    <span>{e.cost}</span>
-                    <span>·</span>
-                    <span>{e.registration}</span>
-                    {e.registrationStatus ? (
-                      <>
-                        <span>·</span>
-                        <span
-                          style={{
-                            color:
-                              REG_STATUS_COLOR[e.registrationStatus] ?? "var(--ink-muted)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {e.registrationStatus.toUpperCase()}
-                        </span>
-                      </>
-                    ) : null}
-                    <span>·</span>
-                    <span>{TIER_LABEL[e.tier]}</span>
-                    {e.cadence ? (
-                      <>
-                        <span>·</span>
-                        <span>{e.cadence}</span>
-                      </>
-                    ) : null}
-                    {e.link ? (
-                      <>
-                        <span>·</span>
-                        <a
-                          href={e.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={(ev) => ev.stopPropagation()}
-                        >
-                          link
-                        </a>
-                      </>
+            {items.map((e) => {
+              const status = e.registrationStatus ?? "Not started";
+              return (
+                <li key={e.id} className="event-list__item event-list__item--editable">
+                  <button
+                    type="button"
+                    className={`event-pick ${e.picked ? "event-pick--on" : ""}`}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      patch(e.id, { picked: !e.picked });
+                    }}
+                    aria-label={e.picked ? "Unpick" : "Pick"}
+                  >
+                    {e.picked ? "✓" : "·"}
+                  </button>
+                  <div className="event-list__time">{e.time ?? "—"}</div>
+                  <div className="event-list__body event-list__body--static">
+                    <div className="event-list__title-row">
+                      <strong>{e.title}</strong>
+                      <button
+                        type="button"
+                        className="event-edit-btn"
+                        onClick={() => setSelectedId(e.id)}
+                        title="Edit all fields"
+                      >
+                        ✎ Edit
+                      </button>
+                    </div>
+                    <div className="event-list__loc">{e.location}</div>
+                    <div className="event-list__meta">
+                      <span>{e.cost}</span>
+                      <span>·</span>
+                      <span>{e.registration}</span>
+                      <span>·</span>
+                      <button
+                        type="button"
+                        className="status-chip-btn"
+                        onClick={() => cycleRegistrationStatus(e)}
+                        title="Click to cycle status"
+                        style={{
+                          color:
+                            REG_STATUS_COLOR[status] ?? "var(--ink-muted)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {status.toUpperCase()}
+                      </button>
+                      <span>·</span>
+                      <span>{TIER_LABEL[e.tier]}</span>
+                      {e.cadence ? (
+                        <>
+                          <span>·</span>
+                          <span>{e.cadence}</span>
+                        </>
+                      ) : null}
+                      {e.link ? (
+                        <>
+                          <span>·</span>
+                          <a
+                            href={e.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            link
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
+                    {e.notes ? (
+                      <div className="event-list__notes">{e.notes}</div>
                     ) : null}
                   </div>
-                  {e.notes ? (
-                    <div className="event-list__notes">{e.notes}</div>
-                  ) : null}
-                </button>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </DbBox>
       ))}
+
+      {showSheetSync ? (
+        <SheetSyncPanel
+          workspace={workspace}
+          initialSheetId={sheetConfig.sheetId}
+          initialTabName={sheetConfig.sheetTabName}
+          lastPushedAt={sheetConfig.lastPushedAt}
+          serviceAccountEmail={sheetConfig.serviceAccountEmail}
+          onClose={() => setShowSheetSync(false)}
+        />
+      ) : null}
 
       {selected ? (
         <EditPanel

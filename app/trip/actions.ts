@@ -4,6 +4,11 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/firebase-admin";
 import {
+  ensureSheetTab,
+  getServiceAccountEmail,
+  writeSheetValues,
+} from "@/lib/google-sheets";
+import {
   SEED_BUDGET,
   SEED_CONTINGENCIES,
   SEED_DAILY_PLANS,
@@ -212,6 +217,89 @@ function deleteField() {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { FieldValue } = require("firebase-admin/firestore");
   return FieldValue.delete();
+}
+
+// ─── Google Sheets two-way sync ──────────────────────────────────────
+
+export async function getSheetConfig(token: string): Promise<{
+  sheetId: string | null;
+  sheetTabName: string | null;
+  lastPushedAt: number | null;
+  serviceAccountEmail: string | null;
+}> {
+  const snap = await workspaceRef(token).get();
+  const meta = (snap.exists ? snap.data() : null) as WorkspaceMeta | null;
+  return {
+    sheetId: meta?.sheetId ?? null,
+    sheetTabName: meta?.sheetTabName ?? null,
+    lastPushedAt: meta?.lastPushedAt ?? null,
+    serviceAccountEmail: getServiceAccountEmail(),
+  };
+}
+
+export async function setSheetConfig(
+  token: string,
+  sheetId: string,
+  tabName: string,
+): Promise<void> {
+  const clean = sheetId.trim();
+  const cleanTab = tabName.trim();
+  if (!clean || !cleanTab) throw new Error("sheetId and tabName required");
+  await workspaceRef(token).set(
+    { sheetId: clean, sheetTabName: cleanTab },
+    { merge: true },
+  );
+  revalidatePath(`/trip/${token}`, "layout");
+}
+
+export async function pushCalendarToSheet(
+  token: string,
+): Promise<{ rowsWritten: number; tabName: string; sheetId: string }> {
+  const cfgSnap = await workspaceRef(token).get();
+  const meta = (cfgSnap.exists ? cfgSnap.data() : null) as WorkspaceMeta | null;
+  if (!meta?.sheetId || !meta.sheetTabName) {
+    throw new Error("Sheet config not set. Add a sheet ID and tab name first.");
+  }
+  await ensureSheetTab(meta.sheetId, meta.sheetTabName);
+  const events = await listEvents(token);
+
+  const header = [
+    "Picked",
+    "Date",
+    "Day",
+    "Time",
+    "Title",
+    "Location",
+    "Cost",
+    "Tier",
+    "Registration type",
+    "Status",
+    "Link",
+    "Notes",
+    "Date kind",
+    "Cadence",
+  ];
+  const rows: (string | number | boolean)[][] = events.map((e) => [
+    e.picked ? "✓" : "",
+    e.date ?? "",
+    e.day ?? "",
+    e.time ?? "",
+    e.title,
+    e.location,
+    e.cost,
+    e.tier,
+    e.registration,
+    e.registrationStatus ?? "",
+    e.link ?? "",
+    e.notes ?? "",
+    e.dateKind,
+    e.cadence ?? "",
+  ]);
+
+  await writeSheetValues(meta.sheetId, `${meta.sheetTabName}!A1`, [header, ...rows]);
+  await workspaceRef(token).set({ lastPushedAt: Date.now() }, { merge: true });
+  revalidatePath(`/trip/${token}`, "layout");
+  return { rowsWritten: rows.length, tabName: meta.sheetTabName, sheetId: meta.sheetId };
 }
 
 export async function listRoutes(token: string): Promise<RouteBlueprint[]> {

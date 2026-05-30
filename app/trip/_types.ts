@@ -138,4 +138,7 @@ export interface WorkspaceMeta {
   createdAt: number;
   seeded: boolean;
   lastSeededAt?: number;
+  sheetId?: string;
+  sheetTabName?: string;
+  lastPushedAt?: number;
 }

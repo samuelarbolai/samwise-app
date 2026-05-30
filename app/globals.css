@@ -565,10 +565,68 @@
   width: 100%;
 }
 
+.event-list__body--static {
+  cursor: default;
+}
+
 .event-list__body:hover strong {
   text-decoration: underline;
   text-decoration-color: var(--accent-gold);
   text-underline-offset: 3px;
+}
+
+.event-list__item--editable {
+  transition: background 0.06s linear;
+}
+
+.event-list__item--editable:hover {
+  background: var(--paper-deep);
+}
+
+.event-list__title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.event-edit-btn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  font-family: var(--font-manrope);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.event-edit-btn:hover {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.status-chip-btn {
+  background: transparent;
+  border: 1px dashed var(--rule);
+  font-family: var(--font-manrope);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  padding: 1px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-chip-btn:hover {
+  background: var(--paper);
+  border-style: solid;
+  border-color: currentColor;
 }
 
 /* ─── Trip · route steps ───────────────────────────────────────────── */
