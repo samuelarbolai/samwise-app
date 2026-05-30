@@ -62,12 +62,24 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
   const remoteContainerRef = useRef<HTMLDivElement | null>(null);
   const startingRef = useRef(false);
   const hardCapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Ref-mirror onDataMessage so the handler bound inside the connect
-  // closure always sees the latest callback without re-binding.
+  // Ref-mirror the callbacks + init so the connect closure always sees
+  // the latest values WITHOUT re-binding `start`. Without this, the
+  // parent (WalkInShell) recreates `init` and `onRoomReady` on every
+  // render — and a render fires on every keystroke in the variables
+  // table — so `start` would change identity, the connect effect would
+  // re-run, and the room would tear down + reconnect on each keystroke.
   const onDataMessageRef = useRef(onDataMessage);
   useEffect(() => {
     onDataMessageRef.current = onDataMessage;
   }, [onDataMessage]);
+  const onRoomReadyRef = useRef(onRoomReady);
+  useEffect(() => {
+    onRoomReadyRef.current = onRoomReady;
+  }, [onRoomReady]);
+  const initRef = useRef(init);
+  useEffect(() => {
+    initRef.current = init;
+  }, [init]);
 
   // Lifecycle: tear down room + timers on unmount. Strip listeners FIRST
   // so the Disconnected event during teardown doesn't race us into the
@@ -169,7 +181,7 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
     room.on(RoomEvent.DataReceived, onData);
 
     try {
-      await room.connect(init.wsUrl, init.token);
+      await room.connect(initRef.current.wsUrl, initRef.current.token);
 
       // Publish camera + mic together. createLocalTracks gives us the
       // local video reference for the self-view PiP without a second
@@ -203,7 +215,7 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
       if (room.remoteParticipants.size > 0) setPhase('active');
       else setPhase('peer-waiting');
 
-      onRoomReady?.(room);
+      onRoomReadyRef.current?.(room);
     } catch (err) {
       console.error('[demo-call] connect failed', err);
       // STRIP LISTENERS BEFORE disconnect — otherwise the Disconnected
@@ -230,7 +242,11 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
     } finally {
       startingRef.current = false;
     }
-  }, [init, hardCapMs, endCall, onRoomReady]);
+    // `init` + `onRoomReady` are read via refs (above), so they are
+    // intentionally NOT deps — the room must connect once, not on every
+    // parent re-render. `hardCapMs` is a value-stable primitive and
+    // `endCall` is stable (memoized on the stable `onEnded`).
+  }, [hardCapMs, endCall]);
 
   useEffect(() => {
     void start();
