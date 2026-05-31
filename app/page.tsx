@@ -82,7 +82,8 @@ export default function RegisterRitualPage() {
   const [view, setView] = useState<View>("create")
 
   return (
-    <SidebarProvider>
+    <div className="brand-editorial">
+      <SidebarProvider>
       <Sidebar collapsible="offcanvas">
         <SidebarHeader>
           <div className="flex items-center gap-2 px-2 py-1.5">
@@ -158,7 +159,8 @@ export default function RegisterRitualPage() {
           {view === "register" && <RegisterRitualCard />}
         </main>
       </SidebarInset>
-    </SidebarProvider>
+      </SidebarProvider>
+    </div>
   )
 }
 

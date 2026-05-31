@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { RoomEvent, type Room } from "livekit-client"
 
@@ -60,6 +60,32 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
   useEffect(() => {
     stateRef.current = state
   }, [state])
+
+  // Whether the prospect is currently in the room — gates the snapshot.
+  const [prospectPresent, setProspectPresent] = useState(false)
+
+  // Signature of the userVisible cleaned values. Changes ONLY when a
+  // notes-visible value changes (prefill, clean, or live edit), so the
+  // effect below re-broadcasts the notes snapshot exactly then. This is the
+  // real fix for "notes never render": the one-shot snapshot-on-join raced
+  // the async qualification prefill (which writes via setStateRaw and never
+  // broadcasts), so the prospect got an empty panel. Re-broadcasting on
+  // every notes change while the prospect is present covers every ordering.
+  const notesSig = useMemo(
+    () =>
+      DEMO_CALL_VARIABLES.filter((v) => v.userVisible)
+        .map((v) => state?.cleaned[v.name] ?? "")
+        .join(""),
+    [state],
+  )
+  useEffect(() => {
+    if (roomReady && prospectPresent) {
+      broadcasterRef.current?.publishSnapshot(
+        stateRef.current?.cleaned ?? {},
+        DEMO_CALL_VARIABLES,
+      )
+    }
+  }, [notesSig, roomReady, prospectPresent])
 
   // setState wrapper publishes diffs over DataChannel when a userVisible
   // variable's cleaned value changes. Same pattern as DemoCallShell.

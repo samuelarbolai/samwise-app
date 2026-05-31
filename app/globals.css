@@ -208,6 +208,67 @@
   color: var(--ink);
 }
 
+/* =====================================================================
+   Editorial brand skin — the landing design language (gallery white ·
+   ink · gold accent · hairline rules · Fraunces + Manrope), applied as an
+   OPT-IN wrapper on the product surfaces only: the home shell, /copilot,
+   /meet, /ritual-call. It overrides the shadcn theme tokens for its own
+   subtree, so every shadcn component inside inherits the brand with no
+   per-component rewrites — and /trip + /outreach (.paper-module) are left
+   exactly as they are. Tokens are set locally, so this also forces light
+   regardless of any ancestor .dark. Palette + type only — the dense
+   layouts are intentionally kept.
+   ===================================================================== */
+.brand-editorial {
+  --background: #FFFFFF;
+  --foreground: #1A1A1A;
+  --card: #FFFFFF;
+  --card-foreground: #1A1A1A;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1A1A;
+  --primary: #1A1A1A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F5F3EF;
+  --secondary-foreground: #1A1A1A;
+  --muted: #F5F3EF;
+  --muted-foreground: #555555;
+  --accent: #F3ECDC; /* faint gold wash for hover / selected */
+  --accent-foreground: #1A1A1A;
+  --destructive: #B23A2F; /* hairline-red register, not a loud red */
+  --destructive-foreground: #FFFFFF;
+  --border: #E4E1DA; /* warm hairline rule */
+  --input: #E4E1DA;
+  --ring: #D4A85A; /* gold focus ring — the spot accent */
+  --radius: 0.5rem;
+
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #1A1A1A;
+  --sidebar-primary: #1A1A1A;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F5F3EF;
+  --sidebar-accent-foreground: #1A1A1A;
+  --sidebar-border: #E4E1DA;
+  --sidebar-ring: #D4A85A;
+
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--app-manrope), 'Manrope', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Fraunces for headings + card titles — the editorial serif moment. */
+.brand-editorial :is(h1, h2, h3, h4),
+.brand-editorial [data-slot="card-title"] {
+  font-family: var(--app-fraunces), 'Fraunces', Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.brand-editorial ::selection {
+  background: var(--ring);
+  color: #1A1A1A;
+}
+
 /* ─── Page shell (outreach + trip share these) ──────────────────────── */
 
 .page-shell {

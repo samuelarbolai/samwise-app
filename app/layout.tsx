@@ -6,14 +6,16 @@ import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
-const _fraunces = Fraunces({
+const fraunces = Fraunces({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
   style: ["normal", "italic"],
+  variable: "--app-fraunces",
 });
-const _manrope = Manrope({
+const manrope = Manrope({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
+  variable: "--app-manrope",
 });
 const _caveat = Caveat({
   subsets: ["latin"],
@@ -50,7 +52,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased" suppressHydrationWarning>
+      <body
+        className={`font-sans antialiased ${fraunces.variable} ${manrope.variable}`}
+        suppressHydrationWarning
+      >
         {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}

@@ -44,9 +44,23 @@ interface RawLoadedScript {
 export async function loadCallScript(
   googleDocLink: string,
 ): Promise<LoadedScript> {
-  const res = await fetch(LOAD_CALL_SCRIPT_URL, {
+  // NEVER cache the script — it must always reflect the live Google Doc.
+  // We defeat every HTTP-cache layer at once: `cache: "no-store"` bypasses
+  // the browser cache, a unique cache-busting query param defeats any
+  // URL-keyed proxy/CDN cache, and the no-cache request headers ask any
+  // intermediary to revalidate. The cloud function reads `req.body`, so
+  // the extra query param is ignored server-side.
+  const bustUrl = `${LOAD_CALL_SCRIPT_URL}?_cb=${Date.now()}-${Math.round(
+    Math.random() * 1e9,
+  )}`
+  const res = await fetch(bustUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
     body: JSON.stringify({ googleDocLink }),
   })
   if (!res.ok) {
