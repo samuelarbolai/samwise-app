@@ -3,12 +3,20 @@
 import type { Room } from "livekit-client"
 import type { DemoCallVariable } from "@/app/copilot/demo-call-config"
 
-// The story stages Samuel can broadcast to the prospect's screen.
-// "hidden" clears the visual; the other three map 1:1 to the three
-// scenes of the Ritual Story (doc spine → cycle → neuro crossfade).
+// The story stages Samuel can broadcast to the prospect's screen, in
+// Phase 9 order: doc → promise → loop → mechanism → experience.
+// "hidden" clears the visual. The document renders as a persistent spine;
+// "doc" shows it on its own (the first beat). A non-invasive "yet to be
+// answered" list appears from the loop beat on (derived from the stage).
 // Kept here next to the publisher; the landing side declares its own
 // copy of this union (cross-repo dup, same as VideoCallExperience).
-export type StoryStage = "hidden" | "doc" | "cycle" | "neuro"
+export type StoryStage =
+  | "hidden"
+  | "doc"
+  | "promise"
+  | "loop"
+  | "mechanism"
+  | "experience"
 
 // Publishes two kinds of data events over the LiveKit DataChannel:
 //   - demo-call:variable_update — a userVisible variable's cleaned
@@ -23,6 +31,16 @@ export interface VariableBroadcaster {
     variables: DemoCallVariable[],
   ) => void
   publishVisual: (stage: StoryStage) => void
+  /** Re-emit every non-empty userVisible cleaned value as variable_update
+   *  events. Call when the prospect joins so prefilled / pre-join notes
+   *  arrive — the diff path only fires on CHANGES while connected, and the
+   *  on-mount qualification prefill bypasses the broadcaster entirely, so
+   *  without this the prospect sees an empty notes panel until the rep
+   *  edits something live. */
+  publishSnapshot: (
+    cleaned: Record<string, string>,
+    variables: DemoCallVariable[],
+  ) => void
 }
 
 export function createVariableBroadcaster(room: Room): VariableBroadcaster {
@@ -53,6 +71,21 @@ export function createVariableBroadcaster(room: Room): VariableBroadcaster {
       // Reliable + ordered: the prospect must never see a stale stage
       // after Samuel advances. Same transport flags as the variables.
       void room.localParticipant.publishData(payload, { reliable: true })
+    },
+    publishSnapshot(cleaned, variables) {
+      for (const v of variables) {
+        if (!v.userVisible) continue
+        const value = (cleaned[v.name] ?? "").trim()
+        if (!value) continue
+        const payload = encoder.encode(
+          JSON.stringify({
+            type: "demo-call:variable_update",
+            name: v.name,
+            value,
+          }),
+        )
+        void room.localParticipant.publishData(payload, { reliable: true })
+      }
     },
   }
 }

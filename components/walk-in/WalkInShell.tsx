@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import type { Room } from "livekit-client"
+import { RoomEvent, type Room } from "livekit-client"
 
 import {
   VideoCallExperience,
@@ -54,6 +54,12 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
 
   const broadcasterRef = useRef<VariableBroadcaster | null>(null)
   const [roomReady, setRoomReady] = useState(false)
+  // Mirror latest state into a ref so the participant-join listener wired
+  // in handleRoomReady reads fresh cleaned values without re-binding.
+  const stateRef = useRef<SessionState | null>(null)
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   // setState wrapper publishes diffs over DataChannel when a userVisible
   // variable's cleaned value changes. Same pattern as DemoCallShell.
@@ -149,8 +155,19 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
   }, [walkInId])
 
   const handleRoomReady = (room: Room) => {
-    broadcasterRef.current = createVariableBroadcaster(room)
+    const broadcaster = createVariableBroadcaster(room)
+    broadcasterRef.current = broadcaster
     setRoomReady(true)
+    // Re-emit current notes when the prospect joins (and if already
+    // present — the rep may have joined second). Fixes the empty-notes
+    // bug: the on-mount qualification prefill writes via setStateRaw and
+    // never broadcasts, so the prospect needs this snapshot to see them.
+    const snapshot = () => {
+      const s = stateRef.current
+      if (s) broadcaster.publishSnapshot(s.cleaned, DEMO_CALL_VARIABLES)
+    }
+    room.on(RoomEvent.ParticipantConnected, snapshot)
+    if (room.remoteParticipants.size > 0) snapshot()
   }
 
   if (error) {

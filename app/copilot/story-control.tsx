@@ -9,9 +9,11 @@ import type { StoryStage } from "@/lib/demo-call/broadcast"
 // seeing so the active stage is highlighted. Disabled until the
 // LiveKit room is ready (publish would no-op before then).
 const STAGES: { stage: StoryStage; label: string }[] = [
-  { stage: "doc", label: "1 · The Doc" },
-  { stage: "cycle", label: "2 · The Cycle" },
-  { stage: "neuro", label: "3 · The Neuro" },
+  { stage: "doc", label: "1 · Doc" },
+  { stage: "promise", label: "2 · Promise" },
+  { stage: "loop", label: "3 · Daily Loop" },
+  { stage: "mechanism", label: "4 · Mechanism" },
+  { stage: "experience", label: "5 · Six-Step Loop" },
 ]
 
 export function StoryControl({
@@ -29,7 +31,7 @@ export function StoryControl({
   }
 
   return (
-    <div className="flex flex-col gap-2 border-b bg-muted/30 p-4">
+    <div className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background p-4">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Story on prospect&apos;s screen
