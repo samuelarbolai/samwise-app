@@ -184,15 +184,26 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
     const broadcaster = createVariableBroadcaster(room)
     broadcasterRef.current = broadcaster
     setRoomReady(true)
-    // Re-emit current notes when the prospect joins (and if already
-    // present — the rep may have joined second). Fixes the empty-notes
-    // bug: the on-mount qualification prefill writes via setStateRaw and
-    // never broadcasts, so the prospect needs this snapshot to see them.
+    // Track whether the prospect is in the room. This is what actually
+    // drives the reactive snapshot effect above: without it,
+    // `prospectPresent` stayed false forever, the effect's guard never
+    // passed, and notes that finished cleaning AFTER the prospect joined
+    // (the 1.5s clean debounce) were never re-broadcast — the empty-notes
+    // race the effect was meant to close.
+    const syncPresence = () =>
+      setProspectPresent(room.remoteParticipants.size > 0)
+    // Immediate snapshot on join — belt-and-suspenders with the reactive
+    // effect (which also fires a tick later when prospectPresent flips).
     const snapshot = () => {
       const s = stateRef.current
       if (s) broadcaster.publishSnapshot(s.cleaned, DEMO_CALL_VARIABLES)
     }
-    room.on(RoomEvent.ParticipantConnected, snapshot)
+    room.on(RoomEvent.ParticipantConnected, () => {
+      syncPresence()
+      snapshot()
+    })
+    room.on(RoomEvent.ParticipantDisconnected, syncPresence)
+    syncPresence()
     if (room.remoteParticipants.size > 0) snapshot()
   }
 
