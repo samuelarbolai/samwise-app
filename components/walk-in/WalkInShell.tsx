@@ -8,6 +8,11 @@ import {
   VideoCallExperience,
   type VideoCallInit,
 } from "@/components/demo-call/VideoCallExperience"
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable"
 import { VariablesTable } from "@/app/copilot/variables-table"
 import { ScriptPane } from "@/app/copilot/script-pane"
 import { QualifyPrefillRow } from "@/app/copilot/qualify-prefill-row"
@@ -234,47 +239,72 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
   const firstName = init.booking.prospect.name.split(" ")[0] ?? ""
 
   return (
-    <main className="grid h-screen grid-cols-[minmax(360px,1fr)_minmax(380px,1fr)_2fr]">
-      <section className="relative h-full border-r">
-        <VideoCallExperience
-          init={initForVideo}
-          peerLabel={firstName ? `${firstName} waiting…` : undefined}
-          onRoomReady={handleRoomReady}
-        />
-      </section>
-      <section className="overflow-auto border-r">
-        <StoryControl
-          ready={roomReady}
-          onPublish={(stage) => broadcasterRef.current?.publishVisual(stage)}
-        />
-        {/* Manual qualification-load fallback — always available. The
-            auto-prefill on mount tries booking.prospect.email; this
-            row lets the rep load a different identifier if the
-            auto-prefill missed (different email at /qualify vs /book)
-            or if the rep wants to re-load mid-call. Seeded with the
-            booking email so the common case is a one-tap reload. */}
-        <div className="border-b bg-muted/30 p-4">
-          <QualifyPrefillRow
-            script={script}
-            setState={setState}
-            initialIdentifier={init.booking.prospect.email}
+    // Three resizable columns: video | variables panel | script. The rep can
+    // drag either divider to rebalance — e.g. widen the script while reading,
+    // or give the variables panel more room while capturing. defaultSize keeps
+    // the original 25/25/50 split; autoSaveId persists the rep's preferred
+    // layout across reloads (per-browser, like the copilot's localStorage).
+    <main className="h-screen">
+      <ResizablePanelGroup
+        direction="horizontal"
+        autoSaveId="walk-in-shell-layout"
+        className="h-screen"
+      >
+        <ResizablePanel
+          id="video"
+          order={1}
+          defaultSize={25}
+          minSize={15}
+          className="relative overflow-hidden"
+        >
+          <VideoCallExperience
+            init={initForVideo}
+            peerLabel={firstName ? `${firstName} waiting…` : undefined}
+            onRoomReady={handleRoomReady}
           />
-        </div>
-        <VariablesTable
-          variables={DEMO_CALL_VARIABLES}
-          state={state}
-          setState={setState}
-          docUrl={DEFAULT_DEMO_SCRIPT_DOC_URL}
-          script={script}
-        />
-      </section>
-      <section className="overflow-auto">
-        <ScriptPane
-          phases={script.phases}
-          cleaned={state.cleaned}
-          version={script.version}
-        />
-      </section>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="variables" order={2} defaultSize={25} minSize={18}>
+          <div className="h-full overflow-auto">
+            <StoryControl
+              ready={roomReady}
+              onPublish={(stage) =>
+                broadcasterRef.current?.publishVisual(stage)
+              }
+            />
+            {/* Manual qualification-load fallback — always available. The
+                auto-prefill on mount tries booking.prospect.email; this
+                row lets the rep load a different identifier if the
+                auto-prefill missed (different email at /qualify vs /book)
+                or if the rep wants to re-load mid-call. Seeded with the
+                booking email so the common case is a one-tap reload. */}
+            <div className="border-b bg-muted/30 p-4">
+              <QualifyPrefillRow
+                script={script}
+                setState={setState}
+                initialIdentifier={init.booking.prospect.email}
+              />
+            </div>
+            <VariablesTable
+              variables={DEMO_CALL_VARIABLES}
+              state={state}
+              setState={setState}
+              docUrl={DEFAULT_DEMO_SCRIPT_DOC_URL}
+              script={script}
+            />
+          </div>
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="script" order={3} defaultSize={50} minSize={25}>
+          <div className="h-full overflow-auto">
+            <ScriptPane
+              phases={script.phases}
+              cleaned={state.cleaned}
+              version={script.version}
+            />
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </main>
   )
 }
