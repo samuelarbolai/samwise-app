@@ -269,6 +269,50 @@
   color: #1A1A1A;
 }
 
+/* ─── Editorial component shapes — the deeper pass ───────────────────────────
+   Flatten the shadcn defaults across EVERY product surface in one place (same
+   spirit as the token overrides above). Cards stop floating, inputs lose their
+   inner shadow, and the brand mark becomes the gold ✦ Fraunces wordmark. /trip
+   + /outreach are untouched (they don't use these slots / aren't wrapped). */
+
+/* Cards: hairline border, NO heavy shadow, calmer radius — printed, not floating. */
+.brand-editorial [data-slot="card"] {
+  box-shadow: none;
+  border-color: var(--border);
+  border-radius: var(--radius);
+}
+
+/* Inputs / selects / textareas / buttons: drop the inner shadow. The hairline
+   border + gold focus ring already come from the tokens. */
+.brand-editorial :is(
+    [data-slot="input"],
+    [data-slot="select-trigger"],
+    [data-slot="textarea"],
+    [data-slot="button"]
+  ) {
+  box-shadow: none;
+}
+
+/* Brand wordmark — Fraunces italic + a tiny gold ✦ superscript, mirroring the
+   landing's mark (call.css .demo-call-prejoin-brand). */
+.brand-editorial .brand-wordmark {
+  font-family: var(--app-fraunces), 'Fraunces', Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: baseline;
+  line-height: 1;
+}
+
+.brand-editorial .brand-wordmark__star {
+  color: var(--accent-gold);
+  font-size: 0.5em;
+  vertical-align: super;
+  padding-left: 3px;
+}
+
 /* ─── Page shell (outreach + trip share these) ──────────────────────── */
 
 .page-shell {

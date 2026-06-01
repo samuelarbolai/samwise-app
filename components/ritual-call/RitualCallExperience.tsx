@@ -205,8 +205,8 @@ export function RitualCallExperience() {
 
   return (
     <div
-      className={`relative flex min-h-screen flex-col items-center justify-center bg-neutral-950 text-neutral-100 px-6 py-12 transition-shadow duration-200 ${
-        isHot ? 'shadow-[inset_0_0_120px_24px_rgba(255,140,40,0.55)]' : ''
+      className={`relative flex min-h-screen flex-col items-center justify-center bg-background text-foreground px-6 py-12 transition-shadow duration-200 ${
+        isHot ? 'shadow-[inset_0_0_120px_24px_rgba(212,168,90,0.30)]' : ''
       }`}
     >
       {/* Persistent header — leaves the conversation and returns to the
@@ -219,7 +219,7 @@ export function RitualCallExperience() {
             void roomRef.current?.disconnect();
             roomRef.current = null;
           }}
-          className="inline-flex items-center gap-2 text-sm text-neutral-400 transition-colors hover:text-neutral-100"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Samwise
@@ -278,8 +278,8 @@ function PasteLinkForm({
       }}
       className="flex w-full max-w-xl flex-col gap-4"
     >
-      <h1 className="text-3xl font-semibold tracking-tight">Ritual call</h1>
-      <p className="text-neutral-400">
+      <h1 className="text-3xl tracking-tight">Ritual call</h1>
+      <p className="text-muted-foreground">
         Paste the link to your ritual document. The agent will guide you through filling it in.
       </p>
       <input
@@ -288,25 +288,25 @@ function PasteLinkForm({
         value={docLink}
         onChange={(e) => onChange(e.target.value)}
         placeholder="https://docs.google.com/document/d/…"
-        className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-4 py-3 text-base outline-none focus:border-neutral-300"
+        className="w-full rounded-md border border-input bg-transparent px-4 py-3 text-base outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         required
       />
       <button
         type="submit"
         disabled={!docLink}
-        className="w-full rounded-md bg-neutral-100 px-4 py-3 text-base font-medium text-neutral-950 disabled:opacity-40"
+        className="w-full rounded-md bg-primary px-4 py-3 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
       >
         Start
       </button>
-      {errorMsg ? <p className="text-sm text-red-400">{errorMsg}</p> : null}
+      {errorMsg ? <p className="text-sm text-destructive">{errorMsg}</p> : null}
     </form>
   );
 }
 
 function Status({ title }: { title: string }) {
   return (
-    <div className="flex flex-col items-center gap-3 text-neutral-300">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-neutral-100" />
+    <div className="flex flex-col items-center gap-3 text-muted-foreground">
+      <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent-gold)]" />
       <p className="text-lg">{title}</p>
     </div>
   );
@@ -340,20 +340,20 @@ function ActiveControls({
         }}
         className={`flex h-44 w-44 select-none items-center justify-center rounded-full text-base font-medium transition-all ${
           hot
-            ? 'scale-105 bg-orange-400 text-neutral-950 shadow-[0_0_60px_rgba(255,140,40,0.7)]'
-            : 'bg-neutral-100 text-neutral-950 hover:bg-neutral-200'
+            ? 'scale-105 bg-[var(--accent-gold)] text-[#1A1A1A] shadow-[0_0_60px_rgba(212,168,90,0.6)]'
+            : 'bg-primary text-primary-foreground hover:bg-primary/90'
         }`}
       >
         {hot ? 'Listening…' : 'Hold to talk'}
       </button>
-      <p className="max-w-md text-center text-sm text-neutral-400">
+      <p className="max-w-md text-center text-sm text-muted-foreground">
         Hold the button or the spacebar while you speak. Switch tabs freely — the mic mutes itself
         when this page is hidden.
       </p>
       <button
         type="button"
         onClick={onEnd}
-        className="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-300 transition-colors hover:border-neutral-500 hover:text-neutral-100"
+        className="rounded-md border border-input px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
       >
         End conversation
       </button>
@@ -364,14 +364,14 @@ function ActiveControls({
 function Disconnected({ onReconnect }: { onReconnect: () => void }) {
   return (
     <div className="flex flex-col items-center gap-4">
-      <h2 className="text-xl font-semibold">The agent went to sleep.</h2>
-      <p className="max-w-md text-center text-neutral-400">
+      <h2 className="text-xl">The agent went to sleep.</h2>
+      <p className="max-w-md text-center text-muted-foreground">
         We disconnected after a long silence to save resources. Tap below to bring the agent back.
       </p>
       <button
         type="button"
         onClick={onReconnect}
-        className="rounded-md bg-neutral-100 px-6 py-3 font-medium text-neutral-950"
+        className="rounded-md bg-primary px-6 py-3 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >
         Wake the agent
       </button>

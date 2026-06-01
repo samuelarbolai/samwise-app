@@ -209,10 +209,10 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
 
   if (error) {
     return (
-      <main className="flex h-screen items-center justify-center bg-neutral-950 p-6 text-neutral-100">
+      <main className="flex h-screen items-center justify-center bg-background p-6 text-foreground">
         <div className="max-w-md text-center">
-          <h1 className="text-lg font-semibold">Could not join the call.</h1>
-          <p className="mt-2 text-sm text-neutral-400">{error}</p>
+          <h1 className="text-lg">Could not join the call.</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
         </div>
       </main>
     )
@@ -220,8 +220,8 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
 
   if (!init || !script || !state) {
     return (
-      <main className="flex h-screen items-center justify-center bg-neutral-950 text-neutral-100">
-        <p className="text-sm text-neutral-400">Joining the call…</p>
+      <main className="flex h-screen items-center justify-center bg-background text-foreground">
+        <p className="text-sm text-muted-foreground">Joining the call…</p>
       </main>
     )
   }

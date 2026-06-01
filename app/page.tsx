@@ -86,11 +86,11 @@ export default function RegisterRitualPage() {
       <SidebarProvider>
       <Sidebar collapsible="offcanvas">
         <SidebarHeader>
-          <div className="flex items-center gap-2 px-2 py-1.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-              <Sparkles className="h-4 w-4 text-primary" />
-            </div>
-            <span className="font-semibold">Samwise</span>
+          <div className="flex items-center px-2 py-1.5">
+            <span className="brand-wordmark text-[17px]">
+              Samwise
+              <span className="brand-wordmark__star">✦</span>
+            </span>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -277,9 +277,6 @@ function CreateRitualDocCard() {
   return (
     <Card className="w-full max-w-lg">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-          <FilePlus className="h-6 w-6 text-primary" />
-        </div>
         <CardTitle className="text-2xl">Create Ritual Doc</CardTitle>
         <CardDescription>
           Enter the user's metadata. We'll copy the canonical template into your Samwise Rituals folder with these values pre-filled.
@@ -486,9 +483,6 @@ function RegisterRitualCard() {
   return (
     <Card className="w-full max-w-lg">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-          <Sparkles className="h-6 w-6 text-primary" />
-        </div>
         <CardTitle className="text-2xl">Register New Ritual</CardTitle>
         <CardDescription>
           Connect your Google Doc to register a new ritual
