@@ -1,5 +1,9 @@
-export const APPEND_DEMO_CALL_ROW_URL =
-  "https://appenddemocallrow-b6fhjlgejq-uc.a.run.app"
+// Migrated 2026-06-01 to the UNIFIED demo-persistence CF `extractDemoCall`
+// (rep_state mode) — same demoCalls write, now ONE path shared with the
+// autonomous demo-call agent (which uses transcript mode). Update this hash
+// if Firebase assigns a different one on deploy.
+export const EXTRACT_DEMO_CALL_URL =
+  "https://extractdemocall-b6fhjlgejq-uc.a.run.app"
 
 interface SavePayload {
   raw: Record<string, string>
@@ -26,16 +30,18 @@ interface SaveResponse {
 export async function appendDemoCallRow(
   payload: SavePayload,
 ): Promise<SaveResponse> {
-  const res = await fetch(APPEND_DEMO_CALL_ROW_URL, {
+  const res = await fetch(EXTRACT_DEMO_CALL_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    // rep_state mode: the human copilot has typed raw/cleaned values, no
+    // transcript. The CF writes the same demoCalls shape it always did.
+    body: JSON.stringify({ mode: "rep_state", ...payload }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(
       (err as { error?: string }).error ||
-        `appendDemoCallRow failed (${res.status})`,
+        `extractDemoCall failed (${res.status})`,
     )
   }
   return (await res.json()) as SaveResponse

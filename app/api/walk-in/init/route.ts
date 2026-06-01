@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
+  createAgentDispatch,
   getLiveKitWsUrl,
   mintRoomAccessToken,
 } from '@/lib/livekit-dispatch';
@@ -28,6 +29,9 @@ const RequestSchema = z.union([
     name: z.string().min(1).max(120),
     email: z.union([z.string().email().max(200), z.literal('')]),
     language: z.enum(['en', 'es']),
+    // When true, dispatch the autonomous demo-call agent into the new room
+    // instead of waiting for a human therapist. Defaults to human-run.
+    autonomous: z.boolean().optional(),
   }),
   z.object({
     mode: z.literal('join_existing'),
@@ -143,6 +147,26 @@ export async function POST(req: Request) {
       roomName,
     });
 
+    // Autonomous demo: put the demo-call agent in the room (no human
+    // therapist). Gated on the flag so normal walk-ins stay human-run.
+    if (data.autonomous) {
+      try {
+        await createAgentDispatch({
+          agentName: 'ritual-agent',
+          roomName,
+          metadata: {
+            flow: 'demo-call',
+            language: data.language,
+            prospect_name: data.name,
+            prospect_email: data.email,
+            script_doc_url: '',
+          },
+        });
+      } catch (err) {
+        console.error('[walk-in init] demo-call agent dispatch failed', err);
+      }
+    }
+
     return NextResponse.json(
       {
         token,
@@ -173,6 +197,7 @@ export async function POST(req: Request) {
     prospect: { name: string; email: string };
     language: 'en' | 'es';
     scheduledFor: string;
+    autonomous: boolean;
   }
   let booking: NormalizedBooking | null = null;
 
@@ -184,6 +209,8 @@ export async function POST(req: Request) {
       prospect: calendarBooking.prospect,
       language: calendarBooking.language,
       scheduledFor: calendarBooking.scheduledFor,
+      autonomous:
+        (calendarBooking as { autonomous?: boolean }).autonomous === true,
     };
   } else {
     const walkIn = await readWalkIn(data.walkInId);
@@ -196,6 +223,7 @@ export async function POST(req: Request) {
         scheduledFor:
           walkIn.createdAt?.toDate?.().toISOString() ??
           new Date().toISOString(),
+        autonomous: (walkIn as { autonomous?: boolean }).autonomous === true,
       };
     }
   }
@@ -219,6 +247,28 @@ export async function POST(req: Request) {
     identity,
     roomName: booking.roomName,
   });
+
+  // Autonomous demo (scheduled): when the prospect joins, dispatch the
+  // demo-call agent into the room. Gated on the booking's `autonomous` flag.
+  // (v1: dispatches on each user join — add an idempotency guard if rejoins
+  // start spawning duplicate agents.)
+  if (data.side === 'user' && booking.autonomous) {
+    try {
+      await createAgentDispatch({
+        agentName: 'ritual-agent',
+        roomName: booking.roomName,
+        metadata: {
+          flow: 'demo-call',
+          language: booking.language,
+          prospect_name: booking.prospect.name,
+          prospect_email: booking.prospect.email,
+          script_doc_url: '',
+        },
+      });
+    } catch (err) {
+      console.error('[walk-in init] demo-call agent dispatch failed', err);
+    }
+  }
 
   // Trim the projection per side. Therapist gets everything (drives
   // copilot pre-fill); user gets only what the call-room needs to
