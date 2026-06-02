@@ -149,11 +149,28 @@ export async function POST(req: Request) {
       roomName,
     });
 
-    // NOTE: the autonomous demo-call agent is NOT dispatched here. The /meet
-    // lobby redirects to /meet/[walkInId], which dispatches at JOIN (below,
-    // guarded by hasAgentDispatch) — so the agent enters when the prospect
-    // actually lands, and a reload can't spawn a duplicate. `autonomous` is
-    // persisted on the walkIn doc so the join path can read it.
+    // Autonomous demo: put the demo-call agent in the room now (no human
+    // therapist). The walk-in enters the call in-page off THIS token, so the
+    // agent must be dispatched here. A reload re-enters via /meet/[walkInId] →
+    // the join path, which is guarded by hasAgentDispatch, so this dispatch is
+    // never duplicated. Gated on the flag so human walk-ins stay human-run.
+    if (data.autonomous) {
+      try {
+        await createAgentDispatch({
+          agentName: 'ritual-agent',
+          roomName,
+          metadata: {
+            flow: 'demo-call',
+            language: data.language,
+            prospect_name: data.name,
+            prospect_email: data.email,
+            script_doc_url: '',
+          },
+        });
+      } catch (err) {
+        console.error('[walk-in init] demo-call agent dispatch failed', err);
+      }
+    }
 
     return NextResponse.json(
       {
