@@ -179,6 +179,7 @@ export async function POST(req: Request) {
           prospectFirstName: data.name.split(' ')[0] ?? '',
           language: data.language,
           scheduledFor: new Date().toISOString(),
+          autonomous: data.autonomous === true,
         },
       },
       { headers: cors },
@@ -288,6 +289,7 @@ export async function POST(req: Request) {
           prospectFirstName: booking.prospect.name.split(' ')[0] ?? '',
           language: booking.language,
           scheduledFor: booking.scheduledFor,
+          autonomous: booking.autonomous,
         };
 
   return NextResponse.json(
