@@ -49,6 +49,26 @@ export async function createAgentDispatch(args: {
   });
 }
 
+// Returns true if `roomName` already has at least one agent dispatch. Keeps
+// autonomous dispatch idempotent across rejoins/reloads — re-joining a live
+// room must NOT spawn a second agent. Best-effort: on a lookup failure it
+// returns false (proceed to dispatch) so a transient error never leaves an
+// autonomous call with no agent at all.
+export async function hasAgentDispatch(roomName: string): Promise<boolean> {
+  try {
+    const client = new AgentDispatchClient(
+      requireEnv('LIVEKIT_URL'),
+      requireEnv('LIVEKIT_API_KEY'),
+      requireEnv('LIVEKIT_API_SECRET'),
+    );
+    const dispatches = await client.listDispatch(roomName);
+    return dispatches.length > 0;
+  } catch (err) {
+    console.error('[livekit] listDispatch failed; assuming no dispatch', err);
+    return false;
+  }
+}
+
 export function getLiveKitWsUrl(): string {
   return requireEnv('LIVEKIT_URL');
 }

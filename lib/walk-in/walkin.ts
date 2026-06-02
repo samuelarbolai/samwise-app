@@ -14,6 +14,9 @@ export interface WalkInDoc {
   prospect: { name: string; email: string };
   language: 'en' | 'es';
   status: 'waiting' | 'joined' | 'completed';
+  /** True when the room runs with the autonomous AI guide instead of a human
+   * therapist. Read at join to dispatch the demo-call agent (idempotently). */
+  autonomous?: boolean;
   createdAt?: Timestamp;
   joinedAt?: Timestamp;
 }
@@ -31,6 +34,7 @@ export async function createWalkIn(args: {
   prospectKey: string;
   prospect: { name: string; email: string };
   language: 'en' | 'es';
+  autonomous?: boolean;
 }): Promise<void> {
   await getDb()
     .collection('walkIns')
@@ -41,6 +45,7 @@ export async function createWalkIn(args: {
       prospect: args.prospect,
       language: args.language,
       status: 'waiting' as const,
+      autonomous: args.autonomous ?? false,
       createdAt: FieldValue.serverTimestamp(),
     });
 }

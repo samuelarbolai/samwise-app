@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   createAgentDispatch,
   getLiveKitWsUrl,
+  hasAgentDispatch,
   mintRoomAccessToken,
 } from '@/lib/livekit-dispatch';
 import {
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
       prospectKey,
       prospect: { name: data.name, email: data.email },
       language: data.language,
+      autonomous: data.autonomous ?? false,
     });
 
     // Notification is best-effort — a delivery failure should NOT
@@ -147,25 +149,11 @@ export async function POST(req: Request) {
       roomName,
     });
 
-    // Autonomous demo: put the demo-call agent in the room (no human
-    // therapist). Gated on the flag so normal walk-ins stay human-run.
-    if (data.autonomous) {
-      try {
-        await createAgentDispatch({
-          agentName: 'ritual-agent',
-          roomName,
-          metadata: {
-            flow: 'demo-call',
-            language: data.language,
-            prospect_name: data.name,
-            prospect_email: data.email,
-            script_doc_url: '',
-          },
-        });
-      } catch (err) {
-        console.error('[walk-in init] demo-call agent dispatch failed', err);
-      }
-    }
+    // NOTE: the autonomous demo-call agent is NOT dispatched here. The /meet
+    // lobby redirects to /meet/[walkInId], which dispatches at JOIN (below,
+    // guarded by hasAgentDispatch) — so the agent enters when the prospect
+    // actually lands, and a reload can't spawn a duplicate. `autonomous` is
+    // persisted on the walkIn doc so the join path can read it.
 
     return NextResponse.json(
       {
@@ -249,11 +237,16 @@ export async function POST(req: Request) {
     roomName: booking.roomName,
   });
 
-  // Autonomous demo (scheduled): when the prospect joins, dispatch the
-  // demo-call agent into the room. Gated on the booking's `autonomous` flag.
-  // (v1: dispatches on each user join — add an idempotency guard if rejoins
-  // start spawning duplicate agents.)
-  if (data.side === 'user' && booking.autonomous) {
+  // Autonomous demo: when the prospect joins, dispatch the demo-call agent
+  // into the room. Gated on the booking's `autonomous` flag AND on there
+  // being no existing dispatch — so a rejoin/reload of a live room (now the
+  // norm after the reconnection work) re-enters the SAME agent instead of
+  // spawning a duplicate. Covers both walk-in and scheduled autonomous.
+  if (
+    data.side === 'user' &&
+    booking.autonomous &&
+    !(await hasAgentDispatch(booking.roomName))
+  ) {
     try {
       await createAgentDispatch({
         agentName: 'ritual-agent',
