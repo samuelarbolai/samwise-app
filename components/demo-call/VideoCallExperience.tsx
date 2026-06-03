@@ -189,12 +189,19 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
     const onTrackUnsubscribed = (track: RemoteTrack) => {
       track.detach().forEach((el) => el.remove());
     };
-    const onParticipantConnected = () => setPhase('active');
+    // Count only HUMAN remotes for the call's presence state — a silent scribe
+    // (or any agent) joins as a participant but is NOT the person you're
+    // meeting, so it must not flip "waiting" → "active" or hide "peer left".
+    const hasHumanPeer = () =>
+      [...room.remoteParticipants.values()].some((p) => !p.isAgent);
+    const onParticipantConnected = () => {
+      if (hasHumanPeer()) setPhase('active');
+    };
     const onParticipantDisconnected = () => {
-      // Peer left — stay connected so a quick rejoin doesn't require
-      // re-init. If both sides are gone, LiveKit's emptyTimeout closes
-      // the room on its own and we'll get Disconnected here next.
-      if (room.remoteParticipants.size === 0) setPhase('peer-waiting');
+      // Peer left — stay connected so a quick rejoin doesn't require re-init.
+      // If no human remains, LiveKit's emptyTimeout closes the room and we'll
+      // get Disconnected here next.
+      if (!hasHumanPeer()) setPhase('peer-waiting');
     };
     // Involuntary drop ONLY — deliberate teardowns (End call / cap / unmount)
     // strip listeners first, so this never fires on a user-driven exit. Show a
@@ -253,7 +260,7 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
         // button later to re-trigger via another gesture.
       }
 
-      if (room.remoteParticipants.size > 0) setPhase('active');
+      if (hasHumanPeer()) setPhase('active');
       else setPhase('peer-waiting');
 
       onRoomReadyRef.current?.(room);

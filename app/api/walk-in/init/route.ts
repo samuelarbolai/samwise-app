@@ -170,6 +170,20 @@ export async function POST(req: Request) {
       } catch (err) {
         console.error('[walk-in init] demo-call agent dispatch failed', err);
       }
+    } else {
+      // Human walk-in (Samuel + prospect, no AI guide): dispatch the silent
+      // scribe so the call is transcribed in the LiveKit dashboard. A reload
+      // re-enters via the join path (guarded by hasAgentDispatch), so this
+      // dispatch is never duplicated.
+      try {
+        await createAgentDispatch({
+          agentName: 'ritual-agent',
+          roomName,
+          metadata: { flow: 'scribe', language: data.language },
+        });
+      } catch (err) {
+        console.error('[walk-in init] scribe dispatch failed', err);
+      }
     }
 
     return NextResponse.json(
@@ -254,30 +268,29 @@ export async function POST(req: Request) {
     roomName: booking.roomName,
   });
 
-  // Autonomous demo: when the prospect joins, dispatch the demo-call agent
-  // into the room. Gated on the booking's `autonomous` flag AND on there
-  // being no existing dispatch — so a rejoin/reload of a live room (now the
-  // norm after the reconnection work) re-enters the SAME agent instead of
-  // spawning a duplicate. Covers both walk-in and scheduled autonomous.
-  if (
-    data.side === 'user' &&
-    booking.autonomous &&
-    !(await hasAgentDispatch(booking.roomName))
-  ) {
-    try {
-      await createAgentDispatch({
-        agentName: 'ritual-agent',
-        roomName: booking.roomName,
-        metadata: {
-          flow: 'demo-call',
+  // On the prospect's join, ensure the room has its agent — the demo-call guide
+  // for autonomous bookings, otherwise the silent scribe that transcribes the
+  // human↔human call. Guarded by hasAgentDispatch so a rejoin/reload of a live
+  // room (the norm after the reconnection work) re-enters the SAME agent rather
+  // than spawning a duplicate. Covers both walk-in and scheduled.
+  if (data.side === 'user' && !(await hasAgentDispatch(booking.roomName))) {
+    const metadata = booking.autonomous
+      ? {
+          flow: 'demo-call' as const,
           language: booking.language,
           prospect_name: booking.prospect.name,
           prospect_email: booking.prospect.email,
           script_doc_url: '',
-        },
+        }
+      : { flow: 'scribe' as const, language: booking.language };
+    try {
+      await createAgentDispatch({
+        agentName: 'ritual-agent',
+        roomName: booking.roomName,
+        metadata,
       });
     } catch (err) {
-      console.error('[walk-in init] demo-call agent dispatch failed', err);
+      console.error('[walk-in init] agent dispatch failed', err);
     }
   }
 
