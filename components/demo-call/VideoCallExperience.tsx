@@ -235,20 +235,34 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
 
     try {
       await room.connect(initRef.current.wsUrl, initRef.current.token);
-
-      // Publish camera + mic together. createLocalTracks gives us the
-      // local video reference for the self-view PiP without a second
-      // getUserMedia call.
+      
+      // Mic is required; camera is best-effort. Requesting both together
+      // means a missing/denied camera (webcam-less desktop, camera in use)
+      // fails BOTH and kills the voice call. Acquire audio first, then try
+      // video separately and tolerate its failure → call still works audio-only.
       const localTracks: LocalTrack[] = await createLocalTracks({
         audio: true,
-        video: true,
-      });
+        video: false,
+      })
+      try {
+        const [videoTrack] = await createLocalTracks({
+          audio: false,
+          video: true,
+        })
+        if (videoTrack) {
+          localTracks.push(videoTrack)
+          setCamOn(true)
+        }
+      } catch {
+        // No camera / camera denied → audio-only. Reflect it in the control.
+        setCamOn(false)
+      }
       await Promise.all(
         localTracks.map((t) => room.localParticipant.publishTrack(t)),
-      );
-      const localVideo = localTracks.find((t) => t.kind === Track.Kind.Video);
+      )
+      const localVideo = localTracks.find((t) => t.kind === Track.Kind.Video)
       if (localVideo && localVideoRef.current) {
-        localVideo.attach(localVideoRef.current);
+        localVideo.attach(localVideoRef.current)
       }
 
       // Browser autoplay unblock. Safe to call after a user gesture chain
@@ -301,18 +315,24 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
       }
     } catch (err) {
       console.error('[demo-call] connect failed', err);
-      const isMediaErr =
-        err instanceof Error &&
-        /Permission|NotAllowed|NotReadable|denied/i.test(
-          `${err.name} ${err.message}`,
-        );
-      setErrorMsg(
-        isMediaErr
-          ? "We couldn't access your camera or microphone. Grant permission and reload the page."
-          : err instanceof Error
-            ? err.message
-            : 'Could not connect.',
-      );
+      const sig = err instanceof Error ? `${err.name} ${err.message}` : '';
+      let copy: string;
+      if (/NotAllowed|Permission|denied/i.test(sig)) {
+        // The browser has a stored "no" for the mic — reloading will NOT
+        // re-prompt. Point the user at the per-site permission UI instead.
+        copy =
+          'Your microphone is blocked. Open this site’s permissions — ' +
+          'the lock/camera icon in the address bar (on iPhone, tap ' +
+          '“ᴀA” → Website Settings) — set Microphone to ' +
+          'Allow, then reload.';
+      } else if (/NotFound|NotReadable|Overconstrained|Devices/i.test(sig)) {
+        copy =
+          'We couldn’t reach a microphone. Check that one is connected ' +
+          'and not in use by another app, then reload.';
+      } else {
+        copy = err instanceof Error ? err.message : 'Could not connect.';
+      }
+      setErrorMsg(copy);
       setPhase('error');
     } finally {
       startingRef.current = false;

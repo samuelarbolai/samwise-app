@@ -58,6 +58,27 @@ export async function readWalkIn(
   return snap.data() as WalkInDoc;
 }
 
+// Atomically claim the one-time "prospect joined" notification for a booking
+// doc. Returns true EXACTLY ONCE across concurrent joins/reloads — the
+// /meet/[id] route is re-hit on every reconnect (and the lobby create path
+// then re-enters via the same route), so without this guard a reload storm
+// would spam the inbox. Works for either source collection. Returns false if
+// the doc is gone or already claimed.
+export async function claimJoinNotification(
+  collection: 'walkIns' | 'calendarBookings',
+  docId: string,
+): Promise<boolean> {
+  const db = getDb();
+  const ref = db.collection(collection).doc(docId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return false;
+    if (snap.get('joinNotifiedAt')) return false;
+    tx.update(ref, { joinNotifiedAt: FieldValue.serverTimestamp() });
+    return true;
+  });
+}
+
 // Best-effort notification email to Samuel. Writes to `mail/{auto-id}`;
 // Firebase Trigger Email extension watches that collection and sends via
 // the configured SMTP (per memory `reference_firebase_trigger_email_setup.md`).

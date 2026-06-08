@@ -7,6 +7,7 @@ import {
   mintRoomAccessToken,
 } from '@/lib/livekit-dispatch';
 import {
+  claimJoinNotification,
   createWalkIn,
   emailToProspectKey,
   notifySamuelOfWalkIn,
@@ -130,11 +131,15 @@ export async function POST(req: Request) {
     // wouldn't add useful context, just noise).
     if (data.email) {
       try {
-        await notifySamuelOfWalkIn({
-          walkInId,
-          prospect: { name: data.name, email: data.email },
-          language: data.language,
-        });
+        // Claim the one-time notification now so a later reload of this
+        // walk-in (→ join_existing, side:user) doesn't re-notify.
+        if (await claimJoinNotification('walkIns', walkInId)) {
+          await notifySamuelOfWalkIn({
+            walkInId,
+            prospect: { name: data.name, email: data.email },
+            language: data.language,
+          });
+        }
       } catch (err) {
         console.error('[walk-in init] notification mail failed', err);
       }
@@ -220,9 +225,13 @@ export async function POST(req: Request) {
     autonomous: boolean;
   }
   let booking: NormalizedBooking | null = null;
+  // Which collection the id resolved against — needed to claim the
+  // one-time join notification on the correct doc.
+  let source: 'walkIns' | 'calendarBookings' | null = null;
 
   const calendarBooking = await readCalendarBooking(data.walkInId);
   if (calendarBooking) {
+    source = 'calendarBookings';
     booking = {
       roomName: calendarBooking.roomName,
       prospectKey: calendarBooking.prospectKey,
@@ -235,6 +244,7 @@ export async function POST(req: Request) {
   } else {
     const walkIn = await readWalkIn(data.walkInId);
     if (walkIn) {
+      source = 'walkIns';
       booking = {
         roomName: walkIn.roomName,
         prospectKey: walkIn.prospectKey,
@@ -291,6 +301,25 @@ export async function POST(req: Request) {
       });
     } catch (err) {
       console.error('[walk-in init] agent dispatch failed', err);
+    }
+  }
+
+  // The prospect just entered via a pre-created link (scheduled booking or a
+  // reloaded walk-in). Ping Samuel so he can connect. Best-effort, gated on a
+  // contactable email, and claimed write-once so reloads/reconnects — which
+  // re-hit this route — don't spam the inbox. Walk-ins already claimed at
+  // create, so this only newly fires for scheduled bookings' first join.
+  if (data.side === 'user' && source && booking.prospect.email) {
+    try {
+      if (await claimJoinNotification(source, data.walkInId)) {
+        await notifySamuelOfWalkIn({
+          walkInId: data.walkInId,
+          prospect: booking.prospect,
+          language: booking.language,
+        });
+      }
+    } catch (err) {
+      console.error('[walk-in init] join notification mail failed', err);
     }
   }
 
