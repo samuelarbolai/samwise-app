@@ -66,6 +66,13 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // iOS Safari blocks audio autoplay until a user gesture, AND suspends
+  // playback when the tab is backgrounded / the phone locks. When that
+  // happens `room.canPlaybackAudio` flips false; we surface a tap-to-enable
+  // affordance that re-runs startAudio() from inside the tap (the only thing
+  // iOS accepts). Covers both the initial autoplay block and post-background
+  // resume — the inbound twin of the mic auto-mute bug.
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -122,22 +129,12 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
     };
   }, []);
 
-  // Auto-mute when tab hidden — privacy contract, same shape as
-  // RitualCallExperience. The user may be reading something private; we
-  // don't want a hot mic broadcasting it.
-  useEffect(() => {
-    if (phase !== 'active' && phase !== 'peer-waiting') return;
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') {
-        const room = roomRef.current;
-        if (!room) return;
-        void room.localParticipant.setMicrophoneEnabled(false);
-        setMicOn(false);
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [phase]);
+  // NOTE: we deliberately do NOT auto-mute on tab-hidden. The prior handler
+  // muted on `visibilitychange → hidden` with no restore on `visible`, so any
+  // backgrounding — switching windows, or on mobile locking the screen /
+  // switching apps — silently killed the mic for the rest of the call. On a
+  // 50–70 min demo that meant audio "lost in the middle". The mic stays under
+  // explicit user control via the Mute button only.
 
   const endCall = useCallback(() => {
     deliberateRef.current = true;
@@ -226,12 +223,15 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
       }
     };
 
+    const onAudioPlaybackChanged = () => setAudioBlocked(!room.canPlaybackAudio);
+
     room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
     room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
     room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
     room.on(RoomEvent.Disconnected, onDisconnect);
     room.on(RoomEvent.DataReceived, onData);
+    room.on(RoomEvent.AudioPlaybackStatusChanged, onAudioPlaybackChanged);
 
     try {
       await room.connect(initRef.current.wsUrl, initRef.current.token);
@@ -270,9 +270,10 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
       try {
         await room.startAudio();
       } catch {
-        // If the browser still refuses, the user can press the mic
-        // button later to re-trigger via another gesture.
+        // Autoplay still blocked (the live gesture was lost across the
+        // connect await) — the tap-to-enable affordance recovers it.
       }
+      setAudioBlocked(!room.canPlaybackAudio);
 
       if (hasHumanPeer()) setPhase('active');
       else setPhase('peer-waiting');
@@ -343,6 +344,20 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
     void start();
   }, [start]);
 
+  // Re-run the autoplay unblock from inside a real user tap. iOS only honours
+  // startAudio() within a gesture, so this is wired to a visible affordance,
+  // not called automatically. Clears the affordance once playback resumes.
+  const enableAudio = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.startAudio();
+    } catch {
+      // Still blocked — the affordance stays until playback actually resumes.
+    }
+    setAudioBlocked(!room.canPlaybackAudio);
+  }, []);
+
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
@@ -379,6 +394,23 @@ export function VideoCallExperience(props: VideoCallExperienceProps) {
           className="h-full w-full object-cover"
         />
       </div>
+
+      {/* iOS audio recovery: the whole tile becomes a tap target when the
+          browser is blocking playback (autoplay block, or suspension after
+          backgrounding / screen-lock). One tap re-runs startAudio(). */}
+      {phase === 'active' && audioBlocked && (
+        <button
+          type="button"
+          onClick={() => void enableAudio()}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-black/50 text-neutral-100"
+          aria-live="polite"
+        >
+          <span className="text-sm font-medium">Tap to enable sound</span>
+          <span className="text-xs text-neutral-300">
+            Your device paused the call&rsquo;s audio.
+          </span>
+        </button>
+      )}
 
       {/* Status overlay covers the remote area when nobody's there yet
           or the call is over. */}
