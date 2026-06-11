@@ -29,18 +29,16 @@ import type React from "react"
 // =====================================================================
 
 // Fields shared name-for-name between QualificationDoc and DEMO_CALL_VARIABLES.
+// symbolic_anchor_*, alternatives_tried, why_alternatives_failed and
+// alternatives_exhaustion_level are NO LONGER prefilled — they moved into the
+// Demo Call (captured live in Phase 1.5).
 const QUALIFICATION_TO_DEMO_FIELDS: Array<keyof QualificationDoc> = [
   "prospect_name",
   "behaviour_to_change",
   "behaviour_example",
   "core_motivation",
-  "alternatives_tried",
-  "why_alternatives_failed",
   "life_stage_context",
   "problem_duration_self_reported",
-  "symbolic_anchor_type",
-  "symbolic_anchor_description",
-  "alternatives_exhaustion_level",
 ]
 
 // Derived prefills — a qualification field copied into a differently-named

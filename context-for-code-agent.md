@@ -95,7 +95,7 @@ samwise-app/
 ## Out of scope / future modules
 
 - **AI rep agent.** A future LiveKit voice agent that will run a Demo-style call as a substitute for the human rep. Will consume rows captured via `/copilot`. Lives in `samwise-backend/` when built — not in this repo. Currently undefined.
-- **Fit Assessment Call.** Upstream session that captures `behaviour_to_change`, `core_motivation`, `alternatives_tried`, `why_alternatives_failed`, `symbolic_anchor_description` and feeds them forward into the Demo Call via VLOOKUP per the framework. Doesn't exist yet — the copilot currently has the rep type these live during the Demo as a workaround.
+- **Fit Assessment Call.** Upstream session that captures `behaviour_to_change`, `core_motivation`, `life_stage_context`, `problem_duration_self_reported` and feeds them forward into the Demo Call. `symbolic_anchor_description`, `alternatives_tried`, `why_alternatives_failed` were moved OUT of the Fit Assessment and are now captured live in the Demo Call's Phase 1.5.
 - **Onboarding / Call Design copilot.** The `loadCallScript` cloud function already returns `scriptType: "onboarding" | "call_design"` for forward-compat, but `/copilot` only handles `scriptType: "demo"` in v1. Adding these is frontend-only work (a new `*-call-config.ts`, branch on `scriptType` in `page.tsx`) + a sibling `append<Type>Row` cloud function. See the `samwise-session-copilot` skill.
 
 ## Conventions specific to this module

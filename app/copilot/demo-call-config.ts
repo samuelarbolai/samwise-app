@@ -249,8 +249,9 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
   },
   // Phase 1.5 worldview-confirmation helper. Rep-helper-only — no
   // capture, just an LLM-generated SAY line the rep weaves into Phase
-  // 1.5's reflection. Generated immediately on qualification load so
-  // it's ready by the time the call starts.
+  // 1.5's reflection. The symbolic anchor is now captured live in the
+  // demo (it moved out of the Fit Assessment), so this regenerates when
+  // symbolic_anchor_description is captured rather than at qualification load.
   {
     name: "worldview_confirmation_line",
     label: "Phase 1.5 — Worldview confirmation",
@@ -261,7 +262,7 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     cleanable: false,
     repHelperOnly: true,
     suggestTechnique: "phase_1_5_worldview_confirmation",
-    suggestTriggerVariable: "qualification_load",
+    suggestTriggerVariable: "symbolic_anchor_description",
   },
 
   // ---- Phase 3 — Bond ----
