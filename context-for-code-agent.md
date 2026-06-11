@@ -33,7 +33,8 @@ Existing routes:
 
 - `/api/book/slots` — GET, returns `[{day, slots: [HH:mm]}]` for the next 14 days. Calls Google Calendar `freeBusy.query` against `BOOKING_CALENDAR_ID`, subtracts busy intervals from the working-hours window (Mon–Fri 6:00–18:30 America/Bogota, 50-min slots @ 30-min granularity, 24h notice). CORS-open to samwise.life.
 
-- `/api/book/create` — POST, the booking commit. Race-checks the slot with a narrow freeBusy query, calls `events.insert` (NO `attendees` field — personal Gmail rejects it per `reference_google_calendar_service_account.md`), patches event description with the ATTENDEE URL only (NO therapist URL — security), writes `calendarBookings/{calEventId}` to Firestore, writes `mail/` doc with Samwise-branded confirmation + `.ics` attachment (`attachments[]` with `text/calendar; method=REQUEST` — see `reference_firebase_trigger_email_setup.md` note 8). Returns `{ calEventId, scheduledFor, joinUrl }`.
+- `/api/book/create` — POST, the booking commit. Race-checks the slot with a narrow freeBusy query, calls `events.insert` (NO `attendees` field — personal Gmail rejects it per `reference_google_calendar_service_account.md`), patches event description with the ATTENDEE URL only (NO therapist URL — security), writes `calendarBookings/{calEventId}` to Firestore, writes `mail/` doc with Samwise-branded confirmation + `.ics` attachment (`attachments[]` with `text/calendar; method=REQUEST` — see `reference_firebase_trigger_email_setup.md` note 8). Returns `{ calEventId, scheduledFor, joinUrl }`. **Also notifies Samuel** (2026-06-11): after the prospect confirmation email it writes a second `mail/` doc via `notifySamuelOfBooking` (`lib/notify/samuel.ts`) — best-effort, never blocks the booking.
+- `/api/notify/qualify-start` — POST `{ name, email, language }`, called server-to-server by samwise-landing's `/api/qualify/voice-init` when a prospect starts a /qualify voice session (2026-06-11). Writes a `mail/` doc to Samuel via `notifySamuelOfQualifyStart` (`lib/notify/samuel.ts`) so he can push the prospect toward booking. Best-effort: always returns `{ ok: true }`, swallows mail errors. CORS list mirrors `/api/book/create`.
 
 New features extend the relevant route (or add sibling routes under `app/`) and add a new cloud function call. Pattern for cross-origin calls: a wrapper module under `lib/<feature>/` with the function URL as a top-level `const`, mirroring the constants in `app/page.tsx`.
 
@@ -77,6 +78,7 @@ samwise-app/
 │   │   ├── booking.ts            # calendarBookings/{calEventId} reader/writer
 │   │   └── ics.ts                # RFC-5545 iCalendar generator for confirmation email
 │   ├── walk-in/walkin.ts         # walkIns/{id} reader/writer + Samuel-notification email
+│   ├── notify/samuel.ts          # admin emails to Samuel: notifySamuelOfQualifyStart + notifySamuelOfBooking → mail/
 │   └── demo-call/broadcast.ts    # DataChannel broadcaster: userVisible vars (demo-call:variable_update)
 │                                 # + Ritual Story stage (demo-call:show_visual via publishVisual)
 │                                 # + publishSnapshot (re-emits notes on prospect-join). StoryStage:

@@ -12,6 +12,7 @@ import {
 } from '@/lib/book/booking';
 import { buildICS } from '@/lib/book/ics';
 import { getDb } from '@/lib/firebase-admin';
+import { notifySamuelOfBooking } from '@/lib/notify/samuel';
 
 export const runtime = 'nodejs';
 
@@ -226,6 +227,14 @@ export async function POST(req: Request) {
       );
   } catch (err) {
     console.error('[book/create] mail dispatch failed (continuing)', err);
+  }
+
+  // Notify Samuel that a call was booked (best-effort, never blocks the
+  // prospect — the booking already succeeded above).
+  try {
+    await notifySamuelOfBooking({ name, email, language, startISO });
+  } catch (err) {
+    console.error('[book/create] Samuel booking notify failed (continuing)', err);
   }
 
   return NextResponse.json(
