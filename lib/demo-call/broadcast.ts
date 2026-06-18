@@ -18,6 +18,19 @@ export type StoryStage =
   | "mechanism"
   | "experience"
 
+// The /therapists artifact visuals Samuel drives on the therapist's screen
+// during the 50-min therapist-demo call. Hand-synced cross-repo mirror —
+// landing's `TherapistDemoStory` declares the same union. Distinct namespace
+// (`therapist-demo:show_visual`) so it never collides with the prospect demo.
+export type TherapistStage =
+  | "hidden"
+  | "case"
+  | "ritual"
+  | "call"
+  | "arc"
+  | "collaboration"
+  | "offer"
+
 // Publishes two kinds of data events over the LiveKit DataChannel:
 //   - demo-call:variable_update — a userVisible variable's cleaned
 //     value changed (existing; mirrors /qualify's shape).
@@ -31,6 +44,9 @@ export interface VariableBroadcaster {
     variables: DemoCallVariable[],
   ) => void
   publishVisual: (stage: StoryStage) => void
+  /** Therapist-demo equivalent of publishVisual. Same reliable transport,
+   *  different event-name namespace + stage union. */
+  publishTherapistVisual: (stage: TherapistStage) => void
   /** Re-emit every non-empty userVisible cleaned value as variable_update
    *  events. Call when the prospect joins so prefilled / pre-join notes
    *  arrive — the diff path only fires on CHANGES while connected, and the
@@ -70,6 +86,12 @@ export function createVariableBroadcaster(room: Room): VariableBroadcaster {
       )
       // Reliable + ordered: the prospect must never see a stale stage
       // after Samuel advances. Same transport flags as the variables.
+      void room.localParticipant.publishData(payload, { reliable: true })
+    },
+    publishTherapistVisual(stage) {
+      const payload = encoder.encode(
+        JSON.stringify({ type: "therapist-demo:show_visual", stage }),
+      )
       void room.localParticipant.publishData(payload, { reliable: true })
     },
     publishSnapshot(cleaned, variables) {

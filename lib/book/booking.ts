@@ -20,6 +20,11 @@ export interface CalendarBookingDoc {
   /** Google Calendar event ID — duplicated here as the doc id */
   calEventId: string;
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+  /** In-call kind. Drives which visuals the /meet call-room renders and which
+   *  rep control samwise-app's WalkInShell mounts. Optional for backwards
+   *  compat with pre-2026-06-17 docs (which have no `kind`); the call-room
+   *  treats absent as the default prospect demo. */
+  kind?: 'demo' | 'therapist-demo';
   createdAt?: Timestamp;
 }
 
@@ -34,6 +39,7 @@ export async function createCalendarBooking(args: {
   prospect: { name: string; email: string };
   language: 'en' | 'es';
   scheduledFor: string;
+  kind?: 'demo' | 'therapist-demo';
 }): Promise<void> {
   await getDb()
     .collection('calendarBookings')
@@ -46,6 +52,7 @@ export async function createCalendarBooking(args: {
       scheduledFor: args.scheduledFor,
       calEventId: args.calEventId,
       status: 'scheduled' as const,
+      kind: args.kind ?? 'demo',
       createdAt: FieldValue.serverTimestamp(),
     });
 }

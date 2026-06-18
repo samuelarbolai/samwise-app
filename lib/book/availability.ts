@@ -79,8 +79,14 @@ export function computeAvailability(args: {
   now: Date;
   busy: BusyInterval[];
   daysOut?: number;
+  /** Slot length in minutes (defaults to the Breakthrough Call's 50). */
+  durationMin?: number;
+  /** Start-time step in minutes (defaults to 30). */
+  granularityMin?: number;
 }): DaySlots[] {
   const daysOut = args.daysOut ?? DEFAULT_DAYS_OUT;
+  const durationMin = args.durationMin ?? SLOT_DURATION_MIN;
+  const granularityMin = args.granularityMin ?? GRANULARITY_MIN;
   const minBookableTime = new Date(args.now.getTime() + MIN_NOTICE_MS);
 
   const result: DaySlots[] = [];
@@ -98,14 +104,14 @@ export function computeAvailability(args: {
 
     const workStartMin = WORK_START_HOUR * 60 + WORK_START_MIN;
     const workEndMin = WORK_END_HOUR * 60 + WORK_END_MIN;
-    const lastStartMin = workEndMin - SLOT_DURATION_MIN;
+    const lastStartMin = workEndMin - durationMin;
 
     const slots: string[] = [];
-    for (let m = workStartMin; m <= lastStartMin; m += GRANULARITY_MIN) {
+    for (let m = workStartMin; m <= lastStartMin; m += granularityMin) {
       const h = Math.floor(m / 60);
       const mn = m % 60;
       const slotStart = bogotaToUTC(year, month, day, h, mn);
-      const slotEnd = new Date(slotStart.getTime() + SLOT_DURATION_MIN * 60 * 1000);
+      const slotEnd = new Date(slotStart.getTime() + durationMin * 60 * 1000);
 
       // Past or within minimum-notice window
       if (slotStart < minBookableTime) continue;
@@ -135,6 +141,7 @@ export function computeAvailability(args: {
 export function slotToISORange(args: {
   day: string; // YYYY-MM-DD
   slot: string; // HH:mm
+  durationMin?: number; // defaults to the Breakthrough Call's 50
 }): { startISO: string; endISO: string } {
   const [yStr, monStr, dStr] = args.day.split('-');
   const [hStr, mnStr] = args.slot.split(':');
@@ -146,8 +153,9 @@ export function slotToISORange(args: {
   if ([year, month, day, hour, minute].some((n) => Number.isNaN(n))) {
     throw new Error(`Invalid day/slot: ${args.day} ${args.slot}`);
   }
+  const durationMin = args.durationMin ?? SLOT_DURATION_MIN;
   const start = bogotaToUTC(year, month, day, hour, minute);
-  const end = new Date(start.getTime() + SLOT_DURATION_MIN * 60 * 1000);
+  const end = new Date(start.getTime() + durationMin * 60 * 1000);
 
   // Calendar API accepts ISO with offset; preserve the Bogotá-local
   // offset so the event displays correctly in Samuel's calendar.

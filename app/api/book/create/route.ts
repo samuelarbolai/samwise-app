@@ -4,8 +4,12 @@ import { freeBusy, insertEvent, patchEventDescription } from '@/lib/google-calen
 import {
   slotToISORange,
   TIMEZONE,
-  SLOT_DURATION_MIN,
 } from '@/lib/book/availability';
+import {
+  resolveMeetingType,
+  calendarIdFor,
+  type MeetingTypeConfig,
+} from '@/lib/book/meeting-types';
 import {
   createCalendarBooking,
   emailToProspectKey,
@@ -28,6 +32,7 @@ const RequestSchema = z.object({
   name: z.string().min(1).max(120),
   email: z.string().email().max(200),
   language: z.enum(['en', 'es']),
+  type: z.enum(['breakthrough', 'therapist']).optional(),
 });
 
 const ALLOWED_ORIGINS = [
@@ -57,14 +62,6 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   const cors = corsHeaders(req.headers.get('origin'));
 
-  const calendarId = process.env.BOOKING_CALENDAR_ID;
-  if (!calendarId) {
-    return NextResponse.json(
-      { error: 'BOOKING_CALENDAR_ID not set on the server' },
-      { status: 500, headers: cors },
-    );
-  }
-
   let body: unknown;
   try {
     body = await req.json();
@@ -81,13 +78,22 @@ export async function POST(req: Request) {
       { status: 400, headers: cors },
     );
   }
-  const { day, slot, name, email, language } = parsed.data;
+  const { day, slot, name, email, language, type } = parsed.data;
+
+  const meeting: MeetingTypeConfig = resolveMeetingType(type);
+  const calendarId = calendarIdFor(meeting);
+  if (!calendarId) {
+    return NextResponse.json(
+      { error: 'BOOKING_CALENDAR_ID not set on the server' },
+      { status: 500, headers: cors },
+    );
+  }
 
   // Resolve the slot to concrete UTC + Bogotá-ISO timestamps.
   let startISO: string;
   let endISO: string;
   try {
-    ({ startISO, endISO } = slotToISORange({ day, slot }));
+    ({ startISO, endISO } = slotToISORange({ day, slot, durationMin: meeting.durationMin }));
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Bad slot' },
@@ -129,9 +135,9 @@ export async function POST(req: Request) {
   // Insert first to get the calEventId from Google; description will
   // be patched in a second call to include the per-event join URLs
   // (which depend on the id we just got back).
-  const summary = 'Samwise Breakthrough Call';
+  const summary = meeting.summary;
   const initialDescription = [
-    `Booked via samwise.life/book`,
+    `Booked via samwise.life/book (${meeting.type})`,
     `Attendee: ${name} <${email}>`,
     `Language: ${language === 'es' ? 'Español' : 'English'}`,
   ].join('\n');
@@ -188,6 +194,10 @@ export async function POST(req: Request) {
       prospect: { name, email },
       language,
       scheduledFor: startISO,
+      // therapist-demo bookings flip the in-call surface to the /therapists
+      // artifact visuals. Other meeting types (breakthrough, 15-min therapist
+      // adoption test) carry the default prospect-demo kind.
+      kind: meeting.type === 'therapist-demo' ? 'therapist-demo' : 'demo',
     });
   } catch (err) {
     // Calendar event already created. Log loudly, but return success
@@ -205,7 +215,7 @@ export async function POST(req: Request) {
       uid: `${calEvent.eventId}@samwise.life`,
       startUTC: startDate,
       endUTC: endDate,
-      summary: 'Samwise Breakthrough Call',
+      summary: meeting.summary,
       description: `Join the call: ${joinUrl}`,
       location: joinUrl,
       organizerName: 'Samuel Giraldo',
@@ -223,6 +233,11 @@ export async function POST(req: Request) {
           startISO,
           joinUrl,
           ics,
+          subject: meeting.email.subject[language],
+          intro: meeting.email.intro(
+            formatBogotaHuman(startISO, language),
+            language,
+          ),
         }),
       );
   } catch (err) {
@@ -287,6 +302,8 @@ function buildBookingConfirmationEmail(params: {
   startISO: string;
   joinUrl: string;
   ics: string;
+  subject: string;
+  intro: string;
 }): {
   to: string;
   replyTo: string;
@@ -308,18 +325,9 @@ function buildBookingConfirmationEmail(params: {
     }>;
   };
 } {
-  const { to, language, firstName, startISO, joinUrl, ics } = params;
-  const when = formatBogotaHuman(startISO, language);
+  const { to, language, firstName, joinUrl, ics, subject, intro } = params;
 
-  const subject =
-    language === 'es'
-      ? 'Tu llamada está reservada'
-      : 'Your call is booked';
   const greeting = language === 'es' ? `Hola ${firstName},` : `Hi ${firstName},`;
-  const intro =
-    language === 'es'
-      ? `Reservamos tu llamada para ${when} (hora de Bogotá). Cuando llegue el momento, entra con este link:`
-      : `We've got you down for ${when} (Bogotá time). When the time comes, join here:`;
   const ctaLabel = language === 'es' ? 'Entrar a la llamada' : 'Join the call';
   const sign = language === 'es' ? 'Gracias,\nSamuel' : 'Thanks,\nSamuel';
 
@@ -379,6 +387,3 @@ function buildBookingConfirmationEmail(params: {
     },
   };
 }
-
-// Silence unused-import warning if we want to delete duration later
-void SLOT_DURATION_MIN;

@@ -223,6 +223,10 @@ export async function POST(req: Request) {
     language: 'en' | 'es';
     scheduledFor: string;
     autonomous: boolean;
+    /** In-call kind. Drives which visuals the landing's call-room renders
+     *  and which rep control WalkInShell mounts on this side. Defaults to
+     *  the prospect demo when absent. */
+    kind: 'demo' | 'therapist-demo';
   }
   let booking: NormalizedBooking | null = null;
   // Which collection the id resolved against — needed to claim the
@@ -240,6 +244,7 @@ export async function POST(req: Request) {
       scheduledFor: calendarBooking.scheduledFor,
       autonomous:
         (calendarBooking as { autonomous?: boolean }).autonomous === true,
+      kind: calendarBooking.kind ?? 'demo',
     };
   } else {
     const walkIn = await readWalkIn(data.walkInId);
@@ -254,6 +259,9 @@ export async function POST(req: Request) {
           walkIn.createdAt?.toDate?.().toISOString() ??
           new Date().toISOString(),
         autonomous: (walkIn as { autonomous?: boolean }).autonomous === true,
+        // Walk-ins (the always-open lobby) are always the prospect demo;
+        // therapist-demo bookings only land via calendarBookings.
+        kind: 'demo',
       };
     }
   }
@@ -334,6 +342,7 @@ export async function POST(req: Request) {
           prospect: booking.prospect,
           language: booking.language,
           scheduledFor: booking.scheduledFor,
+          kind: booking.kind,
         }
       : {
           roomName: booking.roomName,
@@ -342,6 +351,7 @@ export async function POST(req: Request) {
           language: booking.language,
           scheduledFor: booking.scheduledFor,
           autonomous: booking.autonomous,
+          kind: booking.kind,
         };
 
   return NextResponse.json(

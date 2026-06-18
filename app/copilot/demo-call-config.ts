@@ -386,10 +386,15 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     label: "End of 5b — Identification level",
     phase: 5,
     meaning:
-      "Your assessment after the full 9-step phase. Best single read: quality of the prospect's correction at Step 8 (precise alternative = high; bland acceptance = low).",
+      "Your assessment after the full 9-step phase. Best single read: quality of the prospect's correction at Step 8 (precise alternative = high; bland acceptance = low). DRIVES the desidentificación branch via [CONDITION] in the script-pane: high = full desid arc (Phases 6 full → 7 → 8); low/medium = short Phase 6 + skip Phases 7-8 + Phase 9 from Paso 2; low also appends the referral path (Phases 16-17). It replaced fit_state as the branch driver.",
     inputKind: "select",
     options: ["low", "medium", "high"],
     cleanable: false,
+    // Default to "high" so the FULL arc is the safe branch the rep sees
+    // before they classify at end of 5b (mirrors fit_state.defaultValue =
+    // "qualified"). The rep narrows it down at end of 5b; if low/medium the
+    // script swaps to the skip path.
+    defaultValue: "high",
   },
 
   // ---- Phase 7 — Solution intro ----
@@ -406,10 +411,16 @@ export const DEMO_CALL_VARIABLES: DemoCallVariable[] = [
     frameworkSemantics: "A short externalising description of the prospect's pattern that goes inside their disidentification mantra ('Estoy enfermo con ___'). Should externalise the problem as a condition the prospect HAS, not who they ARE. Examples: 'una evasión compulsiva del trabajo bajo ansiedad', 'un patrón de huida frente a tareas difíciles'. Do not write a clinical diagnosis in the output — externalise in the prospect's voice and metaphor.",
   },
   {
+    // VESTIGIAL (2026-06-18): no longer a branch driver. The Demo Call's
+    // branching moved to grado_de_identificacion (see above) — Phase 8.5 is
+    // now an acknowledgment of fit, not a re-classification, so nothing sets
+    // fit_state on the call anymore and no script phase is gated on it. Kept
+    // as a passive captured field (harmless; no [CONDITION: fit_state=…] tags
+    // remain in the Doc). Safe to fully retire in a future sweep.
     name: "fit_state",
-    label: "Fit state (post-demo)",
+    label: "Fit state (post-demo, vestigial)",
     phase: 8,
-    meaning: "Re-classification after the full Phase 5-8 desidentification arc. Drives [CONDITION] phase visibility in the script-pane: phases 9-15 (close path) show when 'qualified'; phases 16-17 (rebound) show when 'still_disqualified'.",
+    meaning: "VESTIGIAL — replaced by grado_de_identificacion as the branch driver. No longer set on the call; no script phase is gated on it.",
     inputKind: "select",
     options: ["qualified", "still_disqualified"],
     cleanable: false,

@@ -17,6 +17,7 @@ import { VariablesTable } from "@/app/copilot/variables-table"
 import { ScriptPane } from "@/app/copilot/script-pane"
 import { QualifyPrefillRow } from "@/app/copilot/qualify-prefill-row"
 import { StoryControl } from "@/app/copilot/story-control"
+import { TherapistStoryControl } from "@/app/copilot/therapist-story-control"
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
   DEMO_CALL_VARIABLES,
@@ -44,6 +45,10 @@ interface TherapistInitResponse {
     prospect: { name: string; email: string }
     language: "en" | "es"
     scheduledFor: string
+    /** Meeting kind. Defaults to the prospect demo; "therapist-demo" swaps
+     *  the in-call visuals (TherapistDemoStory) + the rep control
+     *  (TherapistStoryControl) over to the /therapists artifact track. */
+    kind?: "demo" | "therapist-demo"
   }
 }
 
@@ -266,12 +271,21 @@ export function WalkInShell({ walkInId }: { walkInId: string }) {
         <ResizableHandle withHandle />
         <ResizablePanel id="variables" order={2} defaultSize={25} minSize={18}>
           <div className="h-full overflow-auto">
-            <StoryControl
-              ready={roomReady}
-              onPublish={(stage) =>
-                broadcasterRef.current?.publishVisual(stage)
-              }
-            />
+            {init.booking.kind === "therapist-demo" ? (
+              <TherapistStoryControl
+                ready={roomReady}
+                onPublish={(stage) =>
+                  broadcasterRef.current?.publishTherapistVisual(stage)
+                }
+              />
+            ) : (
+              <StoryControl
+                ready={roomReady}
+                onPublish={(stage) =>
+                  broadcasterRef.current?.publishVisual(stage)
+                }
+              />
+            )}
             {/* Manual qualification-load fallback — always available. The
                 auto-prefill on mount tries booking.prospect.email; this
                 row lets the rep load a different identifier if the

@@ -104,46 +104,71 @@ function resolveBlocks(p: LoadedPhase): ScriptBlock[] {
   return []
 }
 
-// A phase may opt into conditional visibility by including a single
-// `[CONDITION: var=value]` line outside any [SAY] block. Gemini's parser
-// usually coalesces consecutive rep-only lines into one note block —
-// so the marker line typically arrives concatenated with the phase's
-// Goal line or other surrounding guidance (e.g. "[CONDITION: ...]\nGoal: ...").
-// Both helpers below operate per-line within note blocks instead of
-// requiring the whole block to match.
-const CONDITION_RE = /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w-]+)\s*\]\s*$/
+// A phase's blocks can carry inline conditional regions:
+//   [CONDITION: var=val]        opens a region (renders only if cleaned[var] is val)
+//   [CONDITION: var=v1,v2]      comma = OR (any listed value matches)
+//   [/CONDITION]                closes the current region (back to "always show")
+//
+// A region runs from its opening marker to the next [CONDITION:]/[/CONDITION]
+// or the end of the phase. A single marker at the TOP of a phase with no
+// close therefore gates the WHOLE phase — preserving the original
+// whole-phase behaviour (and the legacy fit_state usage) unchanged.
+//
+// Gemini's parser coalesces consecutive rep-only lines into one note block,
+// so a marker line usually arrives concatenated with surrounding guidance
+// (e.g. "[CONDITION: ...]\nGoal: ..."). We therefore process note blocks
+// LINE-by-LINE. SAY blocks are gated as a unit by whatever region is active
+// when they appear. The active region carries ACROSS blocks within a phase.
+const CONDITION_OPEN_RE =
+  /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w,\s-]+?)\s*\]\s*$/
+const CONDITION_CLOSE_RE = /^\s*\[\/CONDITION\]\s*$/
 
-function parsePhaseCondition(
-  phase: LoadedPhase,
-): { var: string; value: string } | null {
-  for (const block of phase.blocks) {
-    if (block.kind !== "note") continue
-    for (const line of block.text.split("\n")) {
-      const m = CONDITION_RE.exec(line)
-      if (m) return { var: m[1], value: m[2] }
-    }
-  }
-  return null
+type ActiveCond = { var: string; values: string[] } | null
+
+function condMatches(
+  active: ActiveCond,
+  cleaned: Record<string, string>,
+): boolean {
+  if (!active) return true
+  return active.values.includes((cleaned[active.var] ?? "").trim())
 }
 
-// Removes the [CONDITION: …] line from each note block so the rep doesn't
-// see it in the rendered script. If a note block was nothing but the marker,
-// drop the block entirely; otherwise keep the remaining text.
-function blocksWithoutConditionMarker(blocks: ScriptBlock[]): ScriptBlock[] {
+// Walks a phase's blocks in order, applying inline [CONDITION:] regions and
+// stripping the marker lines. Returns only the blocks/lines that should
+// render for the current `cleaned` state. An empty result means the whole
+// phase is gated out (the caller hides the section).
+function filterBlocksByCondition(
+  blocks: ScriptBlock[],
+  cleaned: Record<string, string>,
+): ScriptBlock[] {
   const out: ScriptBlock[] = []
+  let active: ActiveCond = null
   for (const b of blocks) {
     if (b.kind !== "note") {
-      out.push(b)
+      if (condMatches(active, cleaned)) out.push(b)
       continue
     }
-    const filteredText = b.text
-      .split("\n")
-      .filter((line) => !CONDITION_RE.test(line))
-      .join("\n")
-      .trim()
-    if (filteredText) {
-      out.push({ kind: "note", text: filteredText })
+    const keptLines: string[] = []
+    for (const line of b.text.split("\n")) {
+      const open = CONDITION_OPEN_RE.exec(line)
+      if (open) {
+        active = {
+          var: open[1],
+          values: open[2]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }
+        continue
+      }
+      if (CONDITION_CLOSE_RE.test(line)) {
+        active = null
+        continue
+      }
+      if (condMatches(active, cleaned)) keptLines.push(line)
     }
+    const text = keptLines.join("\n").trim()
+    if (text) out.push({ kind: "note", text })
   }
   return out
 }
@@ -239,11 +264,10 @@ export function ScriptPane({ phases, cleaned, version }: ScriptPaneProps) {
         </div>
       )}
       {phases.map((p) => {
-        const condition = parsePhaseCondition(p)
-        if (condition && cleaned[condition.var] !== condition.value) {
-          return null
-        }
-        const visibleBlocks = blocksWithoutConditionMarker(resolveBlocks(p))
+        const visibleBlocks = filterBlocksByCondition(resolveBlocks(p), cleaned)
+        // Whole phase gated out (every block filtered) → hide the section,
+        // preserving the original "[CONDITION:] hides the phase" UX.
+        if (visibleBlocks.length === 0) return null
         return (
           <section key={String(p.number)} className="mb-10">
             <h2

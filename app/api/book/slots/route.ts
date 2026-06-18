@@ -5,6 +5,7 @@ import {
   TIMEZONE,
   type DaySlots,
 } from '@/lib/book/availability';
+import { resolveMeetingType, calendarIdFor } from '@/lib/book/meeting-types';
 
 export const runtime = 'nodejs';
 
@@ -32,14 +33,18 @@ export async function OPTIONS(req: Request) {
   });
 }
 
-// GET /api/book/slots — returns the next 14 days of available slots
-// for the Samwise Breakthrough Call on the BOOKING_CALENDAR_ID
-// calendar. No query params; the window is fixed (24h from now → 14d
-// out).
+// GET /api/book/slots?type=breakthrough|therapist — returns the next 14 days
+// of available slots for the given meeting type. The type drives slot
+// duration/granularity and which calendar is queried (therapist can use a
+// dedicated calendar via THERAPIST_BOOKING_CALENDAR_ID). Defaults to the
+// Breakthrough Call when type is absent/unknown.
 export async function GET(req: Request) {
   const cors = corsHeaders(req.headers.get('origin'));
 
-  const calendarId = process.env.BOOKING_CALENDAR_ID;
+  const meeting = resolveMeetingType(
+    new URL(req.url).searchParams.get('type'),
+  );
+  const calendarId = calendarIdFor(meeting);
   if (!calendarId) {
     return NextResponse.json(
       { error: 'BOOKING_CALENDAR_ID not set on the server' },
@@ -70,7 +75,12 @@ export async function GET(req: Request) {
     );
   }
 
-  const days: DaySlots[] = computeAvailability({ now, busy });
+  const days: DaySlots[] = computeAvailability({
+    now,
+    busy,
+    durationMin: meeting.durationMin,
+    granularityMin: meeting.granularityMin,
+  });
 
   return NextResponse.json(
     {
