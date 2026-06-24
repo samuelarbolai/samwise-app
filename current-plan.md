@@ -1,247 +1,263 @@
-# current-plan.md — Demo Call: grado-driven desidentificación skip
+# current-plan.md — User-facing /ritual-call + Update ritual button
 
-> Overwrites the previous plan (Samuel notification emails — shipped, separate task in the master Vibe doc).
-> Neurotic-implementer rules in force: ask before deducing; never commit unless asked.
-> This feature spans THREE surfaces; companion slice: `samwise-backend/ritual-agent/current-plan.md` (agent prompt).
+> Overwrites the previous plan ("Demo Call: grado-driven desidentificación skip" — shipped, separate task in the master Vibe doc).
+> Neurotic-implementer rules in force. Minimal-changes-only mandate from the user: do not touch anything that does not need to change.
+> Backend (cloud functions, synthesis prompt, ritual-call agent prompt) is **out of scope** this round, per the user's answers in this session.
 
 ## Plan Summary
 
-Add a flow case to the Demo Call: **prospects who don't need the full desidentificación teaching skip it via a smooth transition and land at "Roadmap to achieve core motivation" → Paso 2.**
+Make `/ritual-call` work as a self-contained user-facing experience that a user can land on from a link in their inbox, paste their Google Doc link, talk to the onboarding agent (current behaviour), and then click an **"Update ritual"** button that re-runs `registerNewRitual` against the same Doc so the call schedule + ritual data in Firestore are rebuilt from whatever they wrote in the Doc during the conversation.
 
-Decisions locked with the user (this session):
+Three changes in samwise-app:
 
-1. **Driver = `grado_de_identificacion`** (captured at end of Phase 5b; values `low | medium | high`). It REPLACES `fit_state` as the branch driver.
-2. **Threshold:** `low` and `medium` skip the desid teaching. `high` runs the full arc.
-3. **Skip scope (low/medium):** the user's short block REPLACES Phase 6's full teaching; **Phase 7 and Phase 8 are skipped entirely**; **Phase 9 Paso 1 is skipped** (it recaps a mantra that was never built); the flow lands on **Phase 9 Paso 2**.
-4. **Phase 8.5** is rewritten from an *evaluation/re-classification* into an *acknowledgment* of the identification status ("la identificación marca el fit") — it no longer sets `fit_state`.
-5. **Referral path (Phases 16–17)** is now **appended for `low` only** — gated on `grado_de_identificacion=low` instead of `fit_state=still_disqualified`.
+1. **Persist the pasted Doc link in `localStorage`** so the input is pre-filled on return visits ("if there is a session, pre-load the google docs session"). On a cold visit the input block still shows blank ("if there is no session, offer the input block").
+2. **Add an "Update ritual" button** inside the live-call view (`ActiveControls`) next to "End conversation". On click it POSTs the cached `docLink` to the existing `registerNewRitual` cloud function and toasts success/failure. No new endpoint, no backend change.
+3. **Lock the route to the call experience only.** Remove the "Back to Samwise" header link from `RitualCallExperience.tsx` so users have no nav into the operator UI. Remove the "Demo Call copilot" sidebar entry from `app/page.tsx` so the operator console no longer advertises it from the main shell (route stays reachable by direct URL).
 
-Resulting flow per identification level:
-
-| Level | Phase 6 | Phase 7 | Phase 8 | Phase 8.5 | Phase 9 | Phases 10–15.6 | Phases 16–17 |
-|---|---|---|---|---|---|---|---|
-| **high** | full block | ✓ | ✓ (mantra) | ack | Paso 1→4 | ✓ close | — |
-| **medium** | short block | skip | skip | ack | Paso 2→4 | ✓ close | — |
-| **low** | short block | skip | skip | ack | Paso 2→4 | ✓ close | ✓ appended |
-
-### ⚠️ Open decisions to confirm at plan review (I did NOT guess these — flagging instead)
-
-- **(A) Does low/medium really continue through the price/close (Phases 10–15.6)?** Q4's "appended" reading = yes (low gets close **and** referral appended). If you want low to skip price and go straight to referral, that flips Phases 10–15.6 to `[CONDITION: grado=high,medium]`.
-- **(B) The short block hardcodes "grado de identificación bajo."** For a *medium* prospect that reads slightly off. Keep verbatim, or substitute `{{grado_de_identificacion}}` (→ "bajo"/"medio")?
-- **(C) Phase 8.5 was one of the three admission-test scarcity beats** (Phase 1 frame / Phase 8.5 pause / Phase 10–11 verdict — see `samwise-script-work`, "Admission-test scarcity"). Turning it into an acknowledgment removes the middle beat; the skill says run all three or none. Accept dropping it, or relocate the scarcity?
-- **(D) Skipping Phase 9 Paso 1 also skips its `doc` + `promise` story visuals** — the skip path would start the visual sequence at `loop` (Paso 2). Fine, or keep the doc/promise reveal in the skip path?
-- **(E) `fit_state` becomes vestigial.** Plan = leave the variable defined (harmless captured field) but remove all `[CONDITION: fit_state=…]` usage. OK, or fully retire it?
-- **(F) Phases 16–17 SAY content was written for *disqualified* prospects** ("you saw the framework but it's for someone else"). For a low-id prospect who just went through the close, that framing is slightly off. Out of scope per Rule 1 unless you want it softened — flagging only.
-
-### Blocker note
-
-The Google Drive MCP was erroring earlier (`net::ERR_FAILED`); it has since reconnected, but this MCP appears read-only for Docs. **The script-Doc edits (Phase B) will be delivered as exact copy-paste text for you to apply in Google Docs** (the established pattern — you own the teleprompter Doc; the copilot reads it live). The code changes (copilot mechanism + agent prompt) I apply directly.
+Nothing else moves. The agent dispatch, LiveKit wiring, audio sink, push-to-talk, mic-mute-on-hidden, state machine, error handling, and `/api/ritual-call/init` route are all untouched.
 
 ## Plan Architecture (Flow)
 
-```
-grado_de_identificacion (set at end of Phase 5b)
-        │
-        ├── high ──► Phase 6 full ─► 7 ─► 8 ─► 8.5 ack ─► 9 (Paso 1→4) ─► 10–15.6 close
-        │
-        ├── medium ─► Phase 6 short ─►(skip 7,8)─► 8.5 ack ─► 9 (Paso 2→4) ─► 10–15.6 close
-        │
-        └── low ────► Phase 6 short ─►(skip 7,8)─► 8.5 ack ─► 9 (Paso 2→4) ─► 10–15.6 close ─► 16–17 referral
-```
-
-Two consumers, edited in lockstep (per `samwise-script-work` "Two consumers… only ONE reads the Doc"):
-- **Human `/copilot`** — parses the script Doc; needs the new block-level `[CONDITION:]` primitive (Phase A) + the Doc edits (Phase B).
-- **Autonomous demo-call agent** — does NOT read the Doc; its authored prompt needs the branch logic added (companion plan, Phase D).
+1. User receives a link → opens `app.samwise.life/ritual-call`.
+2. `RitualCallExperience` mounts. `useEffect` reads `localStorage["ritual-call:docLink"]` and hydrates the `docLink` state. If present, `PasteLinkForm` shows the link pre-filled; otherwise blank. **NEW.**
+3. User submits → existing `start()` runs (POST `/api/ritual-call/init` → dispatch agent → mint token → connect Room). Also writes the link to `localStorage` so it survives a refresh. **NEW: the localStorage write.**
+4. User talks to the agent (current behaviour, untouched).
+5. User clicks **Update ritual** → fires a new `updateRitual()` callback that POSTs `{ googleDocLink: docLink }` to `https://registernewritual-b6fhjlgejq-uc.a.run.app` (same URL the operator console uses). Toast shows success/failure. The LiveKit room is **not** disconnected — the user can keep talking or click "End conversation" themselves. **NEW.**
+6. User clicks "End conversation" → existing behaviour.
 
 ## Plan Structure (Directories and files)
 
 ```
 samwise-app/
-├── app/copilot/script-pane.tsx       EDIT — block-level + value-list [CONDITION:] primitive (core mechanism change)
-└── app/copilot/demo-call-config.ts   EDIT — grado_de_identificacion.defaultValue = "high"; doc-comment fit_state as vestigial
-
-Google Doc 1sBHuGaXCFaP8cmQdUgNpoQYwCq3L4-OfDMDoPR73a5g   EDIT (hand to user) — Phases 6,7,8,8.5,9,16,17 markers + 8.5 rewrite + short block
-
-samwise-backend/ritual-agent/src/flows/demo-call/prompts/demo-call-prompt.ts   EDIT — see companion plan
-samwise-backend/ritual-agent/src/flows/demo-call/*.test.ts                      ADD — branch behaviour tests (TDD per AGENTS.md)
+├── current-plan.md                              # THIS FILE
+├── app/
+│   └── page.tsx                                 # MODIFIED: remove Demo Call copilot SidebarMenuItem
+└── components/
+    └── ritual-call/
+        └── RitualCallExperience.tsx             # MODIFIED: localStorage hydrate/save,
+                                                 #           Update ritual button,
+                                                 #           remove Back to Samwise header
 ```
 
-No new deps, no new env vars, no localStorage bump (no persisted-shape change — `defaultValue` flows through existing `makeEmptyState`).
+No new files. No new routes. No new API endpoints. No package changes.
+
+---
 
 ## Modifications (in phases and steps)
 
-### Phase A — Copilot mechanism: block-level + value-list `[CONDITION:]`
+### Phase 1 / Step 1 — Hydrate + persist the doc link
 
-#### A1 — Rework the condition primitive in `script-pane.tsx`
+- **In-file location:** `samwise-app/components/ritual-call/RitualCallExperience.tsx`, inside `RitualCallExperience()`. Add a hydration `useEffect` immediately after the existing unmount-cleanup `useEffect` (around current lines 40–45). Add a one-line persistence write inside the existing `start()` callback, immediately after the existing `setPhase('identifying')` call (current line ~95).
+- **Should not be modified:** the `roomRef` cleanup effect, the `setMic` callback, the visibility-change auto-mute effect, the spacebar PTT effect, the state machine phases, the room creation block, any LiveKit event wiring, the audio sink ref, the `startingRef` guard.
+- **Code (hydration effect — new):**
 
-- **In-file location:** replace `CONDITION_RE`, `parsePhaseCondition`, and `blocksWithoutConditionMarker` (lines ~114–149) with the new `filterBlocksByCondition` + helpers; update the render map (lines ~241–271).
-- **Should NOT be modified:** `renderText`, `renderParagraphs`, `Block`, `resolveBlocks`, `scrollVarsToPhase`, `scrollVarsToFirstSubstitutedVar`, the `IntersectionObserver` effect.
-- **Backward-compat guarantee:** a single `[CONDITION:]` at the TOP of a phase with no close gates the whole phase to end-of-phase = the original whole-phase behaviour, so existing `fit_state` tags keep working during the Doc migration.
-- **Code (replace the three helpers):**
+  ```tsx
+  const DOC_LINK_STORAGE_KEY = 'ritual-call:docLink';
 
-```ts
-// A phase's blocks can carry inline conditional regions:
-//   [CONDITION: var=val]        opens a region (renders only if cleaned[var] is val)
-//   [CONDITION: var=v1,v2]      comma = OR (any listed value matches)
-//   [/CONDITION]                closes the current region (back to "always show")
-// A region runs from its opening marker to the next [CONDITION:]/[/CONDITION]
-// or the end of the phase. A single marker at the TOP of a phase with no
-// close therefore gates the WHOLE phase — preserving the original
-// whole-phase behaviour (and the legacy fit_state usage) unchanged.
-//
-// Markers live in note blocks (outside [SAY]); the parser coalesces
-// consecutive note lines into one block, so note blocks are processed
-// LINE-by-LINE. SAY blocks are gated as a unit by whatever region is
-// active when they appear. State carries ACROSS blocks within the phase.
-const CONDITION_OPEN_RE =
-  /^\s*\[CONDITION:\s*(\w+)\s*=\s*([\w,\s-]+?)\s*\]\s*$/
-const CONDITION_CLOSE_RE = /^\s*\[\/CONDITION\]\s*$/
-
-type ActiveCond = { var: string; values: string[] } | null
-
-function condMatches(
-  active: ActiveCond,
-  cleaned: Record<string, string>,
-): boolean {
-  if (!active) return true
-  return active.values.includes((cleaned[active.var] ?? "").trim())
-}
-
-// Walks a phase's blocks in order, applying inline [CONDITION:] regions and
-// stripping the marker lines. Returns only the blocks/lines that should
-// render for the current `cleaned` state.
-function filterBlocksByCondition(
-  blocks: ScriptBlock[],
-  cleaned: Record<string, string>,
-): ScriptBlock[] {
-  const out: ScriptBlock[] = []
-  let active: ActiveCond = null
-  for (const b of blocks) {
-    if (b.kind === "say") {
-      if (condMatches(active, cleaned)) out.push(b)
-      continue
+  // Hydrate the doc link from localStorage on first mount so a returning
+  // user does not have to paste their link again. Cold visits stay blank.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DOC_LINK_STORAGE_KEY);
+      if (saved) setDocLink(saved);
+    } catch {
+      // localStorage can be unavailable (private mode, blocked storage);
+      // fall through to the blank form — the user can still paste manually.
     }
-    const keptLines: string[] = []
-    for (const line of b.text.split("\n")) {
-      const open = CONDITION_OPEN_RE.exec(line)
-      if (open) {
-        active = {
-          var: open[1],
-          values: open[2]
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        }
-        continue
-      }
-      if (CONDITION_CLOSE_RE.test(line)) {
-        active = null
-        continue
-      }
-      if (condMatches(active, cleaned)) keptLines.push(line)
+  }, []);
+  ```
+
+  Constant declared at module top, above the component. The try/catch survives storage-disabled browsers (Safari private mode) without breaking the page.
+
+- **Code (persistence inside `start`):** add a single line at the top of `start`, right after `setPhase('identifying')`:
+
+  ```tsx
+  try { window.localStorage.setItem(DOC_LINK_STORAGE_KEY, docLink); } catch {}
+  ```
+
+- **Explanation:** writing on `start()` (rather than on every keystroke) keeps the cache as "the link the user actually used", not whatever half-typed value they left behind. Hydration on mount makes the pre-fill behaviour deterministic on the next visit.
+
+### Phase 1 / Step 2 — Add the Update ritual button
+
+- **In-file location:** same file. Two edits: (a) a new `updateRitual` callback alongside `endConversation` (around current lines 187–202), and (b) a new button inside `ActiveControls` (around current lines 315–362).
+- **Should not be modified:** the `endConversation` callback itself, the `reconnect` callback, the mic button + spacebar handling inside `ActiveControls`, the `Disconnected` component, the `Status` component, the `PasteLinkForm` component.
+- **Code (new callback inside the component):**
+
+  ```tsx
+  const REGISTER_RITUAL_URL =
+    'https://registernewritual-b6fhjlgejq-uc.a.run.app';
+
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // POST the cached docLink to the same cloud function the operator
+  // console uses. Does NOT disconnect the room — user keeps talking
+  // and ends the conversation deliberately when ready.
+  const updateRitual = useCallback(async () => {
+    if (!docLink || isUpdating) return;
+    setIsUpdating(true);
+    try {
+      const res = await fetch(REGISTER_RITUAL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ googleDocLink: docLink }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `Failed (${res.status})`);
+      toast.success('Ritual updated');
+    } catch (err) {
+      toast.error('Could not update ritual', {
+        description: err instanceof Error ? err.message : 'Unknown error.',
+      });
+    } finally {
+      setIsUpdating(false);
     }
-    const text = keptLines.join("\n").trim()
-    if (text) out.push({ kind: "note", text })
-  }
-  return out
-}
-```
-
-- **Code (render map — replace lines ~241–271 body):**
-
-```tsx
-{phases.map((p) => {
-  const visibleBlocks = filterBlocksByCondition(resolveBlocks(p), cleaned)
-  // Whole phase gated out (every block filtered) → hide the section,
-  // preserving the original "[CONDITION:] hides the phase" UX.
-  if (visibleBlocks.length === 0) return null
-  return (
-    <section key={String(p.number)} className="mb-10">
-      <h2
-        id={`script-phase-${String(p.number)}`}
-        data-script-phase={String(p.number)}
-        className="mb-4 scroll-mt-4"
-      >
-        <button
-          type="button"
-          onClick={() => scrollVarsToFirstSubstitutedVar(p)}
-          className="text-xs font-semibold text-muted-foreground uppercase tracking-widest hover:text-foreground transition cursor-pointer text-left w-full"
-          title="Jump variables pane to the first variable substituted here"
-        >
-          {typeof p.number === "number" ? `Phase ${p.number}` : p.number} —{" "}
-          {p.title}
-        </button>
-      </h2>
-      <div className="flex flex-col gap-3">
-        {visibleBlocks.map((b, i) => (
-          <Block key={i} block={b} cleaned={cleaned} />
-        ))}
-      </div>
-    </section>
-  )
-})}
-```
-
-- **Explanation:** one stateful pass per phase; `active` carries across blocks so a region opened in one note block gates the SAY blocks that follow until closed. Value-list `=low,medium` is OR. Empty-after-filter ⇒ hidden section.
-
-#### A2 — `demo-call-config.ts`: default the branch driver + mark fit_state vestigial
-
-- **In-file location:** the `grado_de_identificacion` entry (~line 384) and the `fit_state` entry (~line 408).
-- **Should NOT be modified:** the variables' `options`, `phase`, or any other variable.
-- **Change:** add `defaultValue: "high"` to `grado_de_identificacion` (so the full arc is the safe default the rep sees before classifying at end of 5b — mirrors `fit_state.defaultValue = "qualified"`); note in `meaning` that it drives `[CONDITION]` desid-depth. Add a comment on `fit_state` that it is no longer a branch driver (kept as a passive captured field; pending decision E).
-
-### Phase B — Script Doc edits (HAND TO USER as copy-paste)
-
-Doc `1sBHuGaXCFaP8cmQdUgNpoQYwCq3L4-OfDMDoPR73a5g`. All `[CONDITION:]`/`[/CONDITION]` markers go on their OWN line, OUTSIDE any `[SAY]` block. Exact specs:
-
-- **Phase 6** — wrap the existing full block, then add the short variant:
+  }, [docLink, isUpdating]);
   ```
-  [CONDITION: grado_de_identificacion=high]
-  …(existing full Phase 6 SAY block + the "¿Qué pensás…" + rebound Q&A, unchanged)…
-  [/CONDITION]
-  [CONDITION: grado_de_identificacion=low,medium]
-  [SAY] (the user's short block — verbatim, pending decision B) [/SAY]
-  [/CONDITION]
+
+  `REGISTER_RITUAL_URL` lives next to the component (matching the pattern in `app/page.tsx`). `toast` is `import { toast } from 'sonner';` — sonner is already used elsewhere in the app.
+
+- **Code (button inside `ActiveControls`):** add a third prop and a button. Pass `onUpdate` and `updating` from the parent. Inside `ActiveControls`, render a new button immediately ABOVE "End conversation":
+
+  ```tsx
+  <button
+    type="button"
+    onClick={onUpdate}
+    disabled={updating}
+    className="rounded-md border border-input px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-foreground hover:text-foreground disabled:opacity-40"
+  >
+    {updating ? 'Updating ritual…' : 'Update ritual'}
+  </button>
   ```
-- **Phase 7** — add `[CONDITION: grado_de_identificacion=high]` as the FIRST body line (whole phase gated; runs to end of phase, no close needed).
-- **Phase 8** — same: `[CONDITION: grado_de_identificacion=high]` first body line.
-- **Phase 8.5** — REWRITE body from evaluation → acknowledgment (skeleton below; adjust to your voice). No `[CONDITION:]` (runs for all). Remove the fit_state-setting instruction.
-- **Phase 9** — keep the intro SAY for all; gate Paso 1 only:
+
+  Updated `ActiveControls` signature:
+
+  ```tsx
+  function ActiveControls({
+    onMicDown,
+    onMicUp,
+    onUpdate,
+    onEnd,
+    hot,
+    updating,
+  }: {
+    onMicDown: () => void;
+    onMicUp: () => void;
+    onUpdate: () => void;
+    onEnd: () => void;
+    hot: boolean;
+    updating: boolean;
+  }) { … }
   ```
-  [SAY] Te cuento exactamente cómo es el proceso… [/SAY]
-  [CONDITION: grado_de_identificacion=high]
-  Paso 1 — …(existing recap + doc/promise visuals)…
-  [/CONDITION]
-  Paso 2 — …(unchanged, for all)…  / Paso 3 — … / Paso 4 — …
+
+  At the call site:
+
+  ```tsx
+  {phase === 'active' ? (
+    <ActiveControls
+      onMicDown={() => void setMic(true)}
+      onMicUp={() => void setMic(false)}
+      onUpdate={() => void updateRitual()}
+      onEnd={endConversation}
+      hot={isHot}
+      updating={isUpdating}
+    />
+  ) : null}
   ```
-- **Phases 9, 10, 11, 12, 13, 14, 15, 15.5, 15.6** — DELETE the `[CONDITION: fit_state=qualified]` lines (now unconditional).
-- **Phases 16, 17** — change `[CONDITION: fit_state=still_disqualified]` → `[CONDITION: grado_de_identificacion=low]`.
 
-Proposed Phase 8.5 acknowledgment (skeleton — replace spoken lines with your wording; marked adaptable per Rule 8, no fabricated prospect behaviour):
-```
-Goal: Acknowledge the identification level and name the fit. No longer an evaluation — grado_de_identificacion was set at end of Phase 5b and drives the flow.
-[SAY] [Acknowledge per {{grado_de_identificacion}}: high → "por cómo viviste esto, tu identificación es alta — y eso es justo lo que nos dice que hay un muy buen fit para trabajar juntos"; low/medium → a brief affirmation that ya manejás bien la desidentificación y podemos pasar al roadmap.] [/SAY]
-```
+- **Explanation:** the button is non-destructive — clicking it does not disconnect the room or change phase. Re-clicks are blocked by `isUpdating`. The failure path surfaces the cloud function's error message verbatim via sonner.
 
-### Phase C — Verify the copilot mechanism (local)
+### Phase 1 / Step 3 — Remove the "Back to Samwise" header
 
-- `cd samwise-app && pnpm dev`, open `/copilot`, load the Doc.
-- Toggle `grado_de_identificacion`: `high` → Phase 6 full + 7/8 visible + Phase 9 Paso 1 visible + no 16/17. `medium` → Phase 6 short + 7/8 hidden + Phase 9 from Paso 2 + no 16/17. `low` → as medium + 16/17 visible.
-- Confirm legacy backward-compat: a phase with a single top `[CONDITION: fit_state=qualified]` still hides/shows correctly.
+- **In-file location:** `RitualCallExperience.tsx`, the `<header>` block at current lines 215–227.
+- **Should not be modified:** anything else inside the root `<div>` — the gold glow shadow, the phase-keyed sub-components, the audio sink div.
+- **Code:** delete the entire `<header>…</header>` block. Also remove the now-unused imports: `Link` from `'next/link'` and `ArrowLeft` from `'lucide-react'`. Tsc will fail the build if either remains unused, since the file is in `"use client"` mode and the rest of the file references neither.
+- **Explanation:** the page is now a destination, not a card inside the operator app. Without the header link, the only ways out are "End conversation" (returns to the paste-link form), closing the tab, or typing a different URL — all acceptable for a user-only link.
 
-### Phase D — Agent prompt (companion plan)
+### Phase 2 / Step 0 — Remove the Create Ritual Doc feature (added mid-implementation)
 
-See `samwise-backend/ritual-agent/current-plan.md`. Summary: add grado-driven branch logic to `demo-call-prompt.ts` (Phase 6 variant, skip 7/8 for low/medium, Phase 8.5 acknowledgment rewrite, Phase 9 Paso-1 gate, fit_state→grado for 16/17 append, update the `[If fit_state…]` steering line + `<variables>`), update `buildCurrentPhaseBlock`'s "never skip" wording to allow the branch skips, and add TDD tests (per AGENTS.md).
+- **In-file location:** `samwise-app/app/page.tsx`.
+- **What changed:**
+  - Removed the `CREATE_DOC_URL` constant.
+  - Narrowed `type View` from `"create" | "register"` to `"register"`.
+  - Removed the `"create"` entry from `NAV`; default view is now `"register"`.
+  - Removed the `view === "create" && <CreateRitualDocCard />` branch from `<main>`.
+  - Deleted the entire `CreateRitualDocCard` function, the `MetadataForm` / `MetadataField` types, and the `INITIAL_METADATA` constant.
+  - Pruned now-unused imports: `FilePlus`, `ExternalLink`, `User`, `Mic`, `Languages`, `Phone`, `Clock`, and the whole `@/components/ui/select` import block.
+- **Out of scope:** the `createRitualDoc` cloud function itself stays — only the UI advertisement is removed.
 
-### Testing phase
+### Phase 2 / Step 1 — Remove the Demo Call copilot sidebar entry
 
-- **Local test:** Phase C (copilot). For the agent: `pnpm test` in ritual-agent with new branch tests.
-- **Integration test:** end-to-end autonomous demo at each grado level once deployed (lobby → walk-in/init → agent → demo-voice-room).
-- **Update README:** n/a.
+- **In-file location:** `samwise-app/app/page.tsx`, the second `SidebarMenuItem` inside the "User experience" SidebarGroup at current lines 129–136.
+- **Should not be modified:** the "Ritual call" entry above it (current lines 121–128), the Operator tools group, the `NAV` constant, any of the form components below the sidebar, the layout, the wordmark, the footer.
+- **Code:** delete the six-line `<SidebarMenuItem>…</SidebarMenuItem>` block that wraps `<Link href="/copilot">`. Leave the surrounding `SidebarMenu` and `SidebarGroupContent` intact. Also remove the now-unused `Sparkles` import iff it is no longer referenced elsewhere in the file. (`Sparkles` is also used as the icon for the "Register Ritual" `NAV` item — Step 0 sanity check before deleting the import.)
+- **Sanity check (run before deleting the import):** `grep -n 'Sparkles' samwise-app/app/page.tsx` — if it still appears in `NAV`, KEEP the import.
+- **Explanation:** the `/copilot` route itself stays — operators with the URL can still reach it; it is just no longer advertised in the user-facing nav. A user landing on `/ritual-call` from their inbox has no chrome leading them to the operator console.
 
-### After implementation
+---
 
-- Update `samwise-app/context-for-code-agent.md` (the `/copilot` `[CONDITION:]` paragraph): document block-level + value-list scoping and that grado replaced fit_state as the demo branch driver.
-- Update the `samwise-session-copilot` (section 9) and `samwise-demo-call-agent` skills.
-- Mark the task DONE in the master Vibe doc Projects tab (manual user step).
-- Hand over per-repo commit messages when committable.
+## Testing phase
+
+### Local test (always)
+
+1. From `samwise-app/`, run `pnpm dev` (or `npm run dev`, matching the project's package-manager-of-record).
+2. Open `http://localhost:3000/`. Verify:
+   - "Ritual call" appears in the User experience sidebar group.
+   - "Demo Call copilot" is **gone** from the sidebar.
+3. Open `http://localhost:3000/ritual-call`. Verify:
+   - No "Back to Samwise" link in the header. The header area is empty (or absent) — the only UI is the paste-link form.
+   - The Doc link input is **blank** (first visit, no localStorage value yet).
+4. Paste a known-good Doc link → click Start.
+5. While the call is `'active'`, verify:
+   - The "Update ritual" button is visible above "End conversation".
+   - Clicking it shows a "Ritual updated" toast (or a descriptive error toast if the cloud function rejects).
+   - The room stays connected — clicking the button does not drop the call or change the visible phase.
+6. End the conversation, refresh the page. Verify:
+   - The paste-link input is **pre-filled** with the link from step 4. (localStorage hydration works.)
+7. Open dev-tools → Application → Local Storage → confirm a `ritual-call:docLink` key holds the URL.
+8. Optional: open the page in a private window → verify the input is blank and the page does not crash (try/catch survives storage-disabled browsers).
+
+### Integration test
+
+After deploying samwise-app to Vercel:
+
+1. Send the production URL `app.samwise.life/ritual-call` to a test user (or open in an incognito browser yourself).
+2. Paste a real Doc that already exists in Firestore. Confirm:
+   - The agent dispatches and joins (same as today — nothing changed in `/api/ritual-call/init`).
+   - Clicking "Update ritual" returns a 200 from `registernewritual-b6fhjlgejq-uc.a.run.app`.
+   - The ritual doc in Firestore reflects the updated `userInputs`/`schedules` content from the latest Doc snapshot.
+
+### Update README
+
+`samwise-app` has no README that documents the ritual-call surface; the canonical reference is the `samwise-app-livekit-integration` skill. Skip a README edit. Skill update is captured under "After implementation" below.
+
+---
+
+## After implementation
+
+### Update `samwise-app/context-for-code-agent.md`
+
+Append a Recent Changes entry dated 2026-06-23:
+- `/ritual-call` is now a self-contained user-facing surface. The pasted Doc link is persisted in `localStorage["ritual-call:docLink"]` and hydrated on mount. An "Update ritual" button inside `ActiveControls` POSTs the cached link to `registerNewRitual` without disconnecting the room. The "Back to Samwise" header link was removed so users have no nav into the operator UI. The "Demo Call copilot" sidebar entry was removed from `/`; the `/copilot` route remains reachable by direct URL.
+
+### Update `samwise-app-livekit-integration` skill
+
+In `samwise-app/.claude/skills/samwise-app-livekit-integration/SKILL.md`:
+- Add a short note under "Client-side LiveKit wiring" → "Reusing the same room across multiple sessions" mentioning the localStorage persistence pattern for inputs the user re-uses across sessions.
+- Update the "Sidebar integration" section to drop the second User experience entry from the snippet (only "Ritual call" remains).
+
+### Mark task DONE
+
+User manually marks the corresponding task in the master Vibe doc Projects tab.
+
+---
+
+## Explicitly OUT of scope (do not touch this round)
+
+- `ritual_synthesis_prompt.txt` — frozen until a separate task.
+- `samwise-backend/cloud-functions/functions/src/index.ts` (`registerNewRitual`, `createRitualDoc`) — frozen.
+- `samwise-backend/ritual-agent/src/flows/onboarding/agent.ts` — frozen.
+- `google-doc-template.md` — frozen (will be updated alongside the synthesis prompt later).
+- `/api/ritual-call/init/route.ts` — frozen.
+- The LiveKit `Room` wiring (`livekit-dispatch.ts`, audio sink, PTT, room cleanup) — frozen.
+- The `/copilot` route's code — frozen (only its sidebar advertisement is removed).
+- The dispatch-metadata contract between the app and ritual-agent — frozen.

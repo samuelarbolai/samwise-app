@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   Room,
   RoomEvent,
@@ -12,7 +11,14 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client';
 
-type Phase = 'idle' | 'identifying' | 'connecting' | 'active' | 'disconnected' | 'error';
+type Phase =
+  | 'idle'
+  | 'identifying'
+  | 'connecting'
+  | 'active'
+  | 'disconnected'
+  | 'ended'
+  | 'error';
 
 interface InitResponse {
   token: string;
@@ -20,11 +26,18 @@ interface InitResponse {
   roomName: string;
 }
 
+const DOC_LINK_STORAGE_KEY = 'ritual-call:docLink';
+const REGISTER_RITUAL_URL =
+  'https://registernewritual-b6fhjlgejq-uc.a.run.app';
+
 export function RitualCallExperience() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [docLink, setDocLink] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [micHot, setMicHot] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [sealed, setSealed] = useState(false);
+  const [sealError, setSealError] = useState<string | null>(null);
 
   const roomRef = useRef<Room | null>(null);
   // Hidden DOM container for <audio> elements that play the agent's voice.
@@ -42,6 +55,18 @@ export function RitualCallExperience() {
       void roomRef.current?.disconnect();
       roomRef.current = null;
     };
+  }, []);
+
+  // Hydrate the doc link from localStorage on first mount so a returning
+  // user does not have to paste their link again. Cold visits stay blank.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DOC_LINK_STORAGE_KEY);
+      if (saved) setDocLink(saved);
+    } catch {
+      // localStorage can be unavailable (private mode, blocked storage);
+      // fall through to the blank form — the user can still paste manually.
+    }
   }, []);
 
   const setMic = useCallback(async (on: boolean) => {
@@ -92,7 +117,10 @@ export function RitualCallExperience() {
     if (startingRef.current) return;
     startingRef.current = true;
     setErrorMsg(null);
+    setSealed(false);
+    setSealError(null);
     setPhase('identifying');
+    try { window.localStorage.setItem(DOC_LINK_STORAGE_KEY, docLink); } catch {}
 
     let init: InitResponse;
     try {
@@ -184,11 +212,38 @@ export function RitualCallExperience() {
     void start();
   }, [start]);
 
+  // POST the cached docLink to the same cloud function the operator console
+  // uses. Does NOT disconnect the room — user keeps talking and ends the
+  // conversation deliberately when ready. Flips `sealed` on success so the
+  // EndedBeat (and the corner button) can reflect the new state.
+  const updateRitual = useCallback(async () => {
+    if (!docLink || isUpdating) return;
+    setIsUpdating(true);
+    setSealError(null);
+    try {
+      const res = await fetch(REGISTER_RITUAL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ googleDocLink: docLink }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `Failed (${res.status})`);
+      setSealed(true);
+      toast.success('Ritual sealed');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error.';
+      setSealError(message);
+      toast.error('Could not seal ritual', { description: message });
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [docLink, isUpdating]);
+
   // End the conversation deliberately (vs. closing the tab). Drops the room
-  // immediately so LiveKit minutes stop accruing, then resets back to the
-  // paste-link form so the user can start another call from the same page.
-  // Strip listeners first — otherwise the Disconnected event fires and
-  // races us into the 'disconnected' phase instead of 'idle'.
+  // immediately so LiveKit minutes stop accruing, then lands the user on the
+  // 'ended' beat — the storytelling pivot where they seal what they just
+  // shaped. Strip listeners first — otherwise the Disconnected event fires
+  // and races us into the 'disconnected' phase instead of 'ended'.
   const endConversation = useCallback(() => {
     const room = roomRef.current;
     if (room) {
@@ -197,6 +252,18 @@ export function RitualCallExperience() {
     }
     roomRef.current = null;
     setMicHot(false);
+    setErrorMsg(null);
+    setSealed(false);
+    setSealError(null);
+    setPhase('ended');
+  }, []);
+
+  // Leave the post-call beat and return to the paste form so the user can
+  // start another conversation from scratch (or seal again with a different
+  // Doc link).
+  const restart = useCallback(() => {
+    setSealed(false);
+    setSealError(null);
     setErrorMsg(null);
     setPhase('idle');
   }, []);
@@ -209,22 +276,19 @@ export function RitualCallExperience() {
         isHot ? 'shadow-[inset_0_0_120px_24px_rgba(212,168,90,0.30)]' : ''
       }`}
     >
-      {/* Persistent header — leaves the conversation and returns to the
-          Samwise app shell. Always visible so the user has an exit at any
-          phase without resorting to closing the tab. */}
-      <header className="absolute left-0 right-0 top-0 flex items-center justify-between px-6 py-4">
-        <Link
-          href="/"
-          onClick={() => {
-            void roomRef.current?.disconnect();
-            roomRef.current = null;
-          }}
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Samwise
-        </Link>
-      </header>
+      {/* Persistent fallback — available at every phase for power users who
+          want to seal mid-conversation or without ever calling the agent.
+          Kept small and secondary on purpose: the storytelling pivot lives
+          in the 'ended' beat below, not here. */}
+      <button
+        type="button"
+        onClick={() => void updateRitual()}
+        disabled={!docLink || isUpdating}
+        className="absolute right-6 top-6 rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground hover:text-foreground disabled:opacity-40"
+        title={!docLink ? 'Paste your Doc link first' : 'Seal the ritual now without ending the conversation'}
+      >
+        {isUpdating ? 'Sealing…' : 'Seal my ritual'}
+      </button>
 
       {phase === 'idle' || phase === 'error' ? (
         <PasteLinkForm
@@ -251,6 +315,16 @@ export function RitualCallExperience() {
       ) : null}
 
       {phase === 'disconnected' ? <Disconnected onReconnect={reconnect} /> : null}
+
+      {phase === 'ended' ? (
+        <EndedBeat
+          onSeal={() => void updateRitual()}
+          onRestart={restart}
+          sealing={isUpdating}
+          sealed={sealed}
+          errorMsg={sealError}
+        />
+      ) : null}
 
       {/* Hidden audio sink — LiveKit appends <audio> elements here so the
           agent's voice plays through the user's speakers. */}
@@ -355,7 +429,7 @@ function ActiveControls({
         onClick={onEnd}
         className="rounded-md border border-input px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
       >
-        End conversation
+        I'm done — seal my ritual
       </button>
     </div>
   );
@@ -374,6 +448,63 @@ function Disconnected({ onReconnect }: { onReconnect: () => void }) {
         className="rounded-md bg-primary px-6 py-3 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >
         Wake the agent
+      </button>
+    </div>
+  );
+}
+
+function EndedBeat({
+  onSeal,
+  onRestart,
+  sealing,
+  sealed,
+  errorMsg,
+}: {
+  onSeal: () => void;
+  onRestart: () => void;
+  sealing: boolean;
+  sealed: boolean;
+  errorMsg: string | null;
+}) {
+  if (sealed) {
+    return (
+      <div className="flex max-w-md flex-col items-center gap-5 text-center">
+        <h1 className="text-3xl tracking-tight">Sealed.</h1>
+        <p className="text-muted-foreground">
+          Your ritual is set. I'll call you when your times come.
+        </p>
+        <button
+          type="button"
+          onClick={onRestart}
+          className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+        >
+          talk to me again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full max-w-md flex-col items-center gap-6 text-center">
+      <h1 className="text-3xl tracking-tight">Almost there.</h1>
+      <p className="text-muted-foreground">
+        We just shaped your ritual together. Seal it so I can call you at your set times.
+      </p>
+      <button
+        type="button"
+        onClick={onSeal}
+        disabled={sealing}
+        className="w-full rounded-md bg-primary px-4 py-3 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+      >
+        {sealing ? 'Sealing…' : 'Seal my ritual'}
+      </button>
+      {errorMsg ? <p className="text-sm text-destructive">{errorMsg}</p> : null}
+      <button
+        type="button"
+        onClick={onRestart}
+        className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+      >
+        not done yet? talk to me again
       </button>
     </div>
   );
