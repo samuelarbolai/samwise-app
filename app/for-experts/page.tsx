@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { FileText, Send, Headphones } from "lucide-react"
+import { FileText, Send, Headphones, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,6 +23,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { RegisterRitualCard } from "@/components/register-ritual-card"
 
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
@@ -56,7 +57,10 @@ function configForScriptType(
   return null
 }
 
-export default function CopilotPage() {
+type ExpertView = "copilot" | "register"
+
+export default function ForExpertsPage() {
+  const [view, setView] = useState<ExpertView>("copilot")
   const [docUrl, setDocUrl] = useState(DEFAULT_DEMO_SCRIPT_DOC_URL)
   const [isLoading, setIsLoading] = useState(false)
   const [script, setScript] = useState<LoadedScript | null>(null)
@@ -99,55 +103,114 @@ export default function CopilotPage() {
     }
   }
 
-  // URL gate — minimal form inside the same sidebar shell as the
-  // index route. Mirrors RegisterRitualCard's shape (FieldGroup →
-  // Field → FieldLabel + Input + button) without the Card chrome.
-  if (!script || !state) {
+  // Loaded copilot surface takes over the full viewport (the 2-col
+  // grid needs all the horizontal space). The sidebar shell wraps the
+  // URL gate AND the Register Ritual view — both are page-sized forms.
+  const copilotLoaded = view === "copilot" && script && state
+  const config = copilotLoaded ? configForScriptType(script!.scriptType) : null
+
+  if (copilotLoaded && config) {
     return (
-      <SidebarProvider>
-        <Sidebar collapsible="offcanvas">
-          <SidebarHeader>
-            <div className="flex items-center px-2 py-1.5">
-              <span className="brand-wordmark text-[17px]">
-                Samwise
-                <span className="brand-wordmark__star">✦</span>
-              </span>
-            </div>
-          </SidebarHeader>
-          <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel>Tools</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton isActive tooltip="Copilot">
-                      <Headphones className="h-4 w-4" />
-                      <span>Copilot</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </SidebarContent>
-          <SidebarFooter>
-            <p className="px-2 py-1 text-xs text-muted-foreground">
-              Internal tools · v1
-            </p>
-          </SidebarFooter>
-        </Sidebar>
+      <CopilotSurface
+        variables={config.variables}
+        state={state!}
+        setState={setState}
+        docUrl={docUrl}
+        script={script!}
+        topSlot={
+          config.mode === "onboarding" ? (
+            <OnboardingPrefillRow script={script!} setState={setState} />
+          ) : (
+            <QualifyPrefillRow script={script!} setState={setState} />
+          )
+        }
+        saveOverride={
+          config.mode === "onboarding" ? (
+            <OnboardingSaveRow state={state!} variables={config.variables} />
+          ) : undefined
+        }
+      />
+    )
+  }
 
-        <SidebarInset>
-          <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b bg-background px-4">
-            <SidebarTrigger />
-            <h1 className="text-sm font-medium">
-              Copilot{" "}
-              <span className="text-muted-foreground font-normal">
-                for behavioural experts
-              </span>
-            </h1>
-          </header>
+  if (copilotLoaded && !config) {
+    // Should be unreachable — handleLoad guards. Defensive fallback.
+    return (
+      <main className="p-8 text-center">
+        <p>Unsupported scriptType: {script!.scriptType}</p>
+      </main>
+    )
+  }
 
-          <main className="flex flex-1 flex-col items-center justify-start p-4 py-12">
+  // Sidebar shell — wraps the URL gate (Copilot view, no script yet)
+  // AND the Register Ritual view (therapists registering rituals for
+  // their own users without leaving the for-experts shell).
+  return (
+    <SidebarProvider>
+      <Sidebar collapsible="offcanvas">
+        <SidebarHeader>
+          <div className="flex items-center px-2 py-1.5">
+            <span className="brand-wordmark text-[17px]">
+              Samwise
+              <span className="brand-wordmark__star">✦</span>
+            </span>
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Tools</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "copilot"}
+                    onClick={() => setView("copilot")}
+                    tooltip="Copilot"
+                  >
+                    <Headphones className="h-4 w-4" />
+                    <span>Copilot</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "register"}
+                    onClick={() => setView("register")}
+                    tooltip="Register Ritual"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Register Ritual</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <p className="px-2 py-1 text-xs text-muted-foreground">
+            Internal tools · v1
+          </p>
+        </SidebarFooter>
+      </Sidebar>
+
+      <SidebarInset>
+        <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b bg-background px-4">
+          <SidebarTrigger />
+          <h1 className="text-sm font-medium">
+            {view === "copilot" ? (
+              <>
+                Copilot{" "}
+                <span className="text-muted-foreground font-normal">
+                  for behavioural experts
+                </span>
+              </>
+            ) : (
+              "Register Ritual"
+            )}
+          </h1>
+        </header>
+
+        <main className="flex flex-1 flex-col items-center justify-start p-4 py-12">
+          {view === "copilot" && (
             <div className="w-full max-w-lg">
               <FieldGroup>
                 <Field>
@@ -205,43 +268,11 @@ export default function CopilotPage() {
                 </Button>
               </FieldGroup>
             </div>
-          </main>
-        </SidebarInset>
-      </SidebarProvider>
-    )
-  }
+          )}
 
-  const config = configForScriptType(script.scriptType)
-  if (!config) {
-    // Should be unreachable — handleLoad guards. Defensive fallback.
-    return (
-      <main className="p-8 text-center">
-        <p>Unsupported scriptType: {script.scriptType}</p>
-      </main>
-    )
-  }
-
-  // Loaded surface — full-screen 2-col grid, no sidebar shell (the
-  // sidebar would steal horizontal space the script-pane needs).
-  return (
-    <CopilotSurface
-      variables={config.variables}
-      state={state}
-      setState={setState}
-      docUrl={docUrl}
-      script={script}
-      topSlot={
-        config.mode === "onboarding" ? (
-          <OnboardingPrefillRow script={script} setState={setState} />
-        ) : (
-          <QualifyPrefillRow script={script} setState={setState} />
-        )
-      }
-      saveOverride={
-        config.mode === "onboarding" ? (
-          <OnboardingSaveRow state={state} variables={config.variables} />
-        ) : undefined
-      }
-    />
+          {view === "register" && <RegisterRitualCard />}
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   )
 }
