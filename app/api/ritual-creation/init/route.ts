@@ -21,6 +21,15 @@ function parseDocId(link: string): string | null {
   return match?.[1] ?? null;
 }
 
+// Dispatcher for the Ritual Design Session (the sibling of /ritual-call).
+// The agent helps the user fill the "Ritual" tab of their personal Doc with
+// mantras, the protection procedure, and the activity for the new belief.
+//
+// Unlike /api/ritual-call/init, this route does NOT read the user doc for
+// prior-session variables — the agent's <opening> loads everything it needs
+// from the Doc itself via its readGoogleDoc tool (Doc is the source of
+// truth). The dispatch metadata is therefore minimal: ritual_id +
+// google_doc_id + language.
 export async function POST(req: Request) {
   let body: unknown;
   try {
@@ -61,24 +70,16 @@ export async function POST(req: Request) {
     ? (ritualLanguage as Language)
     : 'en';
 
-  // Pull prior-session variables from the user doc. Missing fields fall
-  // through to empty strings — the agent's parser handles "(none captured)".
-  const userSnapshot = await db.collection('users').doc(userId).get();
-  const userData = userSnapshot.exists ? (userSnapshot.data() ?? {}) : {};
-
-  const roomName = `ritual-call-${ritualDoc.id}-${Date.now()}`;
+  const roomName = `ritual-creation-${ritualDoc.id}-${Date.now()}`;
 
   await createAgentDispatch({
     agentName: 'ritual-agent',
     roomName,
     metadata: {
-      flow: 'ritual-call-design',
+      flow: 'ritual-design',
       ritual_id: ritualDoc.id,
       google_doc_id: docId,
       language,
-      helpers_list: String(userData.helpers_list ?? ''),
-      core_motivation: String(userData.core_motivation ?? ''),
-      daily_activity_to_face_reality: String(userData.daily_activity_to_face_reality ?? ''),
     },
   });
 
