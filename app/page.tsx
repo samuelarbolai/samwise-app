@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Sparkles, PhoneCall } from "lucide-react"
+import { Sparkles, PhoneCall, ScrollText } from "lucide-react"
 
 import {
   Sidebar,
@@ -78,6 +78,14 @@ export default function RegisterRitualPage() {
                     <Link href="/ritual-call">
                       <PhoneCall className="h-4 w-4" />
                       <span>Ritual call</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip="Build ritual">
+                    <Link href="/ritual-creation">
+                      <ScrollText className="h-4 w-4" />
+                      <span>Build ritual</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
