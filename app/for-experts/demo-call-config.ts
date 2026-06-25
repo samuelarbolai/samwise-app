@@ -28,15 +28,13 @@
 // actually captured (alternatives rebound).
 // =====================================================================
 
-export type DemoCallPhase =
-  | "pre-call"
-  | 3
-  | 5
-  | 7
-  | 8
-  | 10
-  | 14
-  | "post-call"
+// Widened 2026-06-24 from a literal union of demo-only phases to
+// `string | number` so onboarding-mode variables (phases 1–14 plus
+// "pre-call" / "post-call") can share the DemoCallVariable interface
+// without a parallel type. The variables-table groups by this key and
+// renders "Phase N" for numbers, raw string otherwise — no behaviour
+// depends on the specific literal set.
+export type DemoCallPhase = "pre-call" | "post-call" | number | string
 
 export type InputKind = "text" | "textarea" | "select" | "number" | "date"
 

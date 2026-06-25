@@ -1,11 +1,13 @@
 import type { LoadedScript } from "./load-script"
-import type { DemoCallVariable } from "@/app/copilot/demo-call-config"
+import type { DemoCallVariable } from "@/app/for-experts/demo-call-config"
 
-// Bumped to v4 when SessionState gained `suggestions` (LLM-generated
-// rep-line cache, populated lazily as trigger variables are captured).
-// Any session persisted under v1–v3 is silently ignored on mount and
-// appears as a fresh URL gate.
-const KEY = "copilot:session:v4"
+// Bumped to v5 when /copilot gained onboarding mode (a second
+// scriptType beyond "demo"). The persisted PersistedSession already
+// carries the scriptType inside `script.scriptType`, so a single key
+// is enough — page.tsx routes restored sessions to the right config
+// based on that field. Any session persisted under v1–v4 is silently
+// ignored on mount and appears as a fresh URL gate.
+const KEY = "copilot:session:v5"
 
 export interface SuggestionEntry {
   /** The generated SAY line. Empty string = "no suggestion (skip marker)"

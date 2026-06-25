@@ -39,6 +39,12 @@ interface VariablesTableProps {
   setState: React.Dispatch<React.SetStateAction<SessionState | null>>
   docUrl: string
   script: LoadedScript
+  /** When provided, REPLACES the default "Save call" button at the
+   * bottom of the variables pane. Onboarding mode passes
+   * <OnboardingSaveRow /> here to get the three-destination save UI.
+   * The default demo Save button keeps the existing demoCalls write
+   * path. */
+  saveOverride?: React.ReactNode
 }
 
 function groupByPhase(vars: DemoCallVariable[]) {
@@ -56,6 +62,7 @@ export function VariablesTable({
   setState,
   docUrl,
   script,
+  saveOverride,
 }: VariablesTableProps) {
   const groups = useMemo(() => groupByPhase(variables), [variables])
 
@@ -169,7 +176,7 @@ export function VariablesTable({
       })
       toast.success(`Saved (doc ${docId}).`)
       clearSessionState()
-      window.location.href = "/copilot"
+      window.location.href = "/for-experts"
     } catch (err) {
       toast.error("Save failed", {
         description: err instanceof Error ? err.message : "Unknown error.",
@@ -185,7 +192,7 @@ export function VariablesTable({
     )
       return
     clearSessionState()
-    window.location.href = "/copilot"
+    window.location.href = "/for-experts"
   }
 
   return (
@@ -234,9 +241,11 @@ export function VariablesTable({
           </div>
         </section>
       ))}
-      <Button onClick={handleSave} className="mt-4">
-        Save call
-      </Button>
+      {saveOverride ?? (
+        <Button onClick={handleSave} className="mt-4">
+          Save call
+        </Button>
+      )}
     </div>
   )
 }

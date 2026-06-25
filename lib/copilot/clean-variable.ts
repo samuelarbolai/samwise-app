@@ -1,6 +1,6 @@
 import type {
   DemoCallVariable,
-} from "@/app/copilot/demo-call-config"
+} from "@/app/for-experts/demo-call-config"
 import type { LoadedScript } from "./load-script"
 
 export const CLEAN_VARIABLE_URL =

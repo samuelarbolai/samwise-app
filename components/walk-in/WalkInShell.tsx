@@ -13,15 +13,15 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
-import { VariablesTable } from "@/app/copilot/variables-table"
-import { ScriptPane } from "@/app/copilot/script-pane"
-import { QualifyPrefillRow } from "@/app/copilot/qualify-prefill-row"
-import { StoryControl } from "@/app/copilot/story-control"
-import { TherapistStoryControl } from "@/app/copilot/therapist-story-control"
+import { VariablesTable } from "@/app/for-experts/variables-table"
+import { ScriptPane } from "@/app/for-experts/script-pane"
+import { QualifyPrefillRow } from "@/app/for-experts/qualify-prefill-row"
+import { StoryControl } from "@/app/for-experts/story-control"
+import { TherapistStoryControl } from "@/app/for-experts/therapist-story-control"
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
   DEMO_CALL_VARIABLES,
-} from "@/app/copilot/demo-call-config"
+} from "@/app/for-experts/demo-call-config"
 import { loadCallScript, type LoadedScript } from "@/lib/copilot/load-script"
 import { loadQualification } from "@/lib/copilot/load-qualification"
 import {

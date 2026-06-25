@@ -1,7 +1,7 @@
 "use client"
 
 import type { Room } from "livekit-client"
-import type { DemoCallVariable } from "@/app/copilot/demo-call-config"
+import type { DemoCallVariable } from "@/app/for-experts/demo-call-config"
 
 // The story stages Samuel can broadcast to the prospect's screen, in
 // Phase 9 order: doc → promise → loop → mechanism → experience.

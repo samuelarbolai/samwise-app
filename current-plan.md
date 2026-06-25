@@ -1,263 +1,312 @@
-# current-plan.md — User-facing /ritual-call + Update ritual button
+# current-plan.md — Onboarding mode in /copilot (frontend)
 
-> Overwrites the previous plan ("Demo Call: grado-driven desidentificación skip" — shipped, separate task in the master Vibe doc).
-> Neurotic-implementer rules in force. Minimal-changes-only mandate from the user: do not touch anything that does not need to change.
-> Backend (cloud functions, synthesis prompt, ritual-call agent prompt) is **out of scope** this round, per the user's answers in this session.
+> Overwrites the previous plan ("/ritual-call + Update ritual button" — shipped, separate task in the master Vibe doc).
+> Neurotic-implementer rules in force. Minimal-changes-only mandate: nothing in the demo-mode path moves unless it is strictly necessary to make onboarding mode coexist.
+> Backend half lives in `samwise-backend/cloud-functions/current-plan.md`. The two plans are siblings — both must ship for /copilot to work in onboarding mode.
 
 ## Plan Summary
 
-Make `/ritual-call` work as a self-contained user-facing experience that a user can land on from a link in their inbox, paste their Google Doc link, talk to the onboarding agent (current behaviour), and then click an **"Update ritual"** button that re-runs `registerNewRitual` against the same Doc so the call schedule + ritual data in Firestore are rebuilt from whatever they wrote in the Doc during the conversation.
+Extend /copilot to render the **onboarding** script as a first-class second mode, sitting beside the existing demo mode. The script Doc is the new onboarding script (`1FrglmnZGDlFS7S89LgaKjKpDiRLEPGxkAYtOomjT08E`) carrying `[TYPE: onboarding]`.
 
-Three changes in samwise-app:
+Three load modes — clinician picks one per session:
+1. **Firestore by email** → look up most recent `demoCalls` doc for that prospectKey via a new `loadDemoCall` CF; hydrate matching onboarding variables.
+2. **Google Doc URL** → CF + Gemini reads any doc the clinician points at (demo transcript, intake notes, anything) and extracts the onboarding variable set.
+3. **Manual** → clinician types into the variables panel directly. (No prefill click; the default state.)
 
-1. **Persist the pasted Doc link in `localStorage`** so the input is pre-filled on return visits ("if there is a session, pre-load the google docs session"). On a cold visit the input block still shows blank ("if there is no session, offer the input block").
-2. **Add an "Update ritual" button** inside the live-call view (`ActiveControls`) next to "End conversation". On click it POSTs the cached `docLink` to the existing `registerNewRitual` cloud function and toasts success/failure. No new endpoint, no backend change.
-3. **Lock the route to the call experience only.** Remove the "Back to Samwise" header link from `RitualCallExperience.tsx` so users have no nav into the operator UI. Remove the "Demo Call copilot" sidebar entry from `app/page.tsx` so the operator console no longer advertises it from the main shell (route stays reachable by direct URL).
+Three save modes — clinician picks any subset at end of session:
+1. **Firestore** → writes to `onboardingSessions/${prospectKey}-${Date.now()}` via new `extractOnboarding` CF. Mirrors `extractDemoCall` rep_state mode.
+2. **Google Doc URL** → clinician pastes a Doc URL at save time, CF appends the cleaned notes block to that doc.
+3. **Clipboard** → pure-client formatter dumps the cleaned values as markdown for paste-anywhere.
 
-Nothing else moves. The agent dispatch, LiveKit wiring, audio sink, push-to-talk, mic-mute-on-hidden, state machine, error handling, and `/api/ritual-call/init` route are all untouched.
+The branching driver is `scriptType: "onboarding"` returned by the existing `loadCallScript` CF (it already detects this from `[TYPE: onboarding]` — no backend change to script load). The frontend rejection in `app/copilot/page.tsx` is lifted in favor of a config-router.
 
 ## Plan Architecture (Flow)
 
-1. User receives a link → opens `app.samwise.life/ritual-call`.
-2. `RitualCallExperience` mounts. `useEffect` reads `localStorage["ritual-call:docLink"]` and hydrates the `docLink` state. If present, `PasteLinkForm` shows the link pre-filled; otherwise blank. **NEW.**
-3. User submits → existing `start()` runs (POST `/api/ritual-call/init` → dispatch agent → mint token → connect Room). Also writes the link to `localStorage` so it survives a refresh. **NEW: the localStorage write.**
-4. User talks to the agent (current behaviour, untouched).
-5. User clicks **Update ritual** → fires a new `updateRitual()` callback that POSTs `{ googleDocLink: docLink }` to `https://registernewritual-b6fhjlgejq-uc.a.run.app` (same URL the operator console uses). Toast shows success/failure. The LiveKit room is **not** disconnected — the user can keep talking or click "End conversation" themselves. **NEW.**
-6. User clicks "End conversation" → existing behaviour.
+```
+                    ┌─────────────────────────────────────────────┐
+                    │ /copilot page.tsx — scriptType router       │
+                    └───┬─────────────────────────┬───────────────┘
+                        │                         │
+              scriptType=demo              scriptType=onboarding
+                        │                         │
+                ┌───────▼──────┐         ┌────────▼─────────────┐
+                │ demo-call-   │         │ onboarding-call-     │
+                │ config.ts    │         │ config.ts (NEW)      │
+                │ (unchanged)  │         │                      │
+                └──────────────┘         └──────────────────────┘
+                                                  │
+                ┌─────────────────────────────────┴──────────────┐
+                │                                                │
+        ┌───────▼──────────┐                          ┌──────────▼──────────┐
+        │ Prefill row      │                          │ Save row            │
+        │ (NEW component)  │                          │ (NEW component)     │
+        ├──────────────────┤                          ├─────────────────────┤
+        │ Firestore email→ │                          │ Firestore           │
+        │   loadDemoCall   │                          │   extractOnboarding │
+        │ Doc URL →        │                          │ Doc URL →           │
+        │   extractOnboar- │                          │   writeOnboarding-  │
+        │   dingFromDoc    │                          │   ToDoc             │
+        │ Manual (no-op)   │                          │ Clipboard (client)  │
+        └──────────────────┘                          └─────────────────────┘
+```
+
+All three NEW cloud functions live in cloud-functions; the frontend speaks to them via thin `lib/copilot/*.ts` wrappers (mirrors existing demo path).
 
 ## Plan Structure (Directories and files)
 
-```
-samwise-app/
-├── current-plan.md                              # THIS FILE
-├── app/
-│   └── page.tsx                                 # MODIFIED: remove Demo Call copilot SidebarMenuItem
-└── components/
-    └── ritual-call/
-        └── RitualCallExperience.tsx             # MODIFIED: localStorage hydrate/save,
-                                                 #           Update ritual button,
-                                                 #           remove Back to Samwise header
-```
+**NEW:**
+- `app/copilot/onboarding-call-config.ts` — variable set, `frameworkSemantics`, phase metadata for onboarding.
+- `app/copilot/onboarding-prefill-row.tsx` — three-mode prefill UI (Firestore email | Doc URL | Manual).
+- `app/copilot/onboarding-save-row.tsx` — three-mode save UI with checkboxes (Firestore | Doc URL | Clipboard).
+- `lib/copilot/load-demo-call.ts` — wrapper for new `loadDemoCall` CF (Firestore-by-email).
+- `lib/copilot/load-from-doc.ts` — wrapper for new `extractOnboardingFromDoc` CF.
+- `lib/copilot/save-onboarding.ts` — wrapper for new `extractOnboarding` CF.
+- `lib/copilot/save-to-doc.ts` — wrapper for new `writeOnboardingToDoc` CF.
+- `lib/copilot/copy-to-clipboard.ts` — pure-client markdown formatter + `navigator.clipboard.writeText`.
+- `lib/copilot/prefill-from-demo-call.ts` — pure helper that takes a `DemoCallDoc` and writes into `SessionState` (mirrors `prefill-from-qualification.ts`).
+- `lib/copilot/prefill-from-doc-extraction.ts` — pure helper that takes the doc-extracted payload and writes into `SessionState`.
 
-No new files. No new routes. No new API endpoints. No package changes.
+**EDITED:**
+- `app/copilot/page.tsx`:
+  - Lift the `scriptType !== "demo"` rejection.
+  - Branch on `loaded.scriptType`: render `<QualifyPrefillRow>` + demo config when `demo`; render `<OnboardingPrefillRow>` + onboarding config when `onboarding`.
+  - Swap Save button: render `<OnboardingSaveRow>` (the multi-target one) when in onboarding mode.
+- `lib/copilot/session-storage.ts`:
+  - Bump key from `copilot:session:v4` → `v5` and namespace by `scriptType` (`copilot:session:v5:demo` / `copilot:session:v5:onboarding`) so loading two different docs in the same browser doesn't bleed state.
+- `lib/copilot/append-row.ts`: NO CHANGE. Demo Save path stays as-is.
+- `app/copilot/copilot-surface.tsx`: NO CHANGE if it already accepts the variables-config as a prop. If it hardcodes `DEMO_CALL_VARIABLES`, add a `variables` prop and thread through (one-line change site each).
 
----
+**UNCHANGED (load-bearing):**
+- `app/copilot/variables-table.tsx` — accepts `variables` via prop already.
+- `app/copilot/script-pane.tsx` — type-agnostic.
+- `app/copilot/demo-call-config.ts`.
+- `lib/copilot/clean-variable.ts`, `lib/copilot/suggest-rep-line.ts`, `lib/copilot/load-script.ts`.
 
 ## Modifications (in phases and steps)
 
-### Phase 1 / Step 1 — Hydrate + persist the doc link
+### Phase 0 — Pre-flight (manual)
 
-- **In-file location:** `samwise-app/components/ritual-call/RitualCallExperience.tsx`, inside `RitualCallExperience()`. Add a hydration `useEffect` immediately after the existing unmount-cleanup `useEffect` (around current lines 40–45). Add a one-line persistence write inside the existing `start()` callback, immediately after the existing `setPhase('identifying')` call (current line ~95).
-- **Should not be modified:** the `roomRef` cleanup effect, the `setMic` callback, the visibility-change auto-mute effect, the spacebar PTT effect, the state machine phases, the room creation block, any LiveKit event wiring, the audio sink ref, the `startingRef` guard.
-- **Code (hydration effect — new):**
+The user must:
+1. Confirm backend plan (`samwise-backend/cloud-functions/current-plan.md`) before any frontend lib wrappers can compile (they import URL constants).
+2. After backend deploy, paste the deployed CF URLs into the wrapper files (same convention as `loadqualification-b6fhjlgejq-uc.a.run.app`).
 
+### Phase 1 — `onboarding-call-config.ts` (NEW)
+
+- **In-file location:** `app/copilot/onboarding-call-config.ts`.
+- **Should not be modified:** `demo-call-config.ts`, `DemoCallVariable` interface — REUSE the interface; do not fork.
+- **Code (sketch):**
+  ```ts
+  import type { DemoCallVariable } from "./demo-call-config";
+
+  export const DEFAULT_ONBOARDING_DOC_URL =
+    "https://docs.google.com/document/d/1FrglmnZGDlFS7S89LgaKjKpDiRLEPGxkAYtOomjT08E/edit";
+
+  export const ONBOARDING_VARIABLES: DemoCallVariable[] = [
+    // pre-session (from demo) — phase: "pre-call"
+    { name: "behaviour_to_change", phase: "pre-call", inputKind: "textarea", cleanable: true, frameworkSemantics: "..." },
+    { name: "behaviour_example", phase: "pre-call", inputKind: "textarea", cleanable: true, frameworkSemantics: "..." },
+    { name: "core_motivation", phase: "pre-call", inputKind: "textarea", cleanable: true },
+    // ... (full set per the rewritten script's variable reference section)
+    // phase 2-4
+    { name: "problem_start_timeline", phase: "2", inputKind: "textarea", cleanable: true },
+    // ...
+    { name: "framework_metaphor", phase: "3", inputKind: "select", options: ["gripa", "enemy", "other"], cleanable: false },
+    // ...
+    { name: "enemy_name", phase: "4a", inputKind: "text", cleanable: true },
+    // ...
+    // phase 9 — `[CONDITION:]` driver
+    { name: "unsettling_reality", phase: "9", inputKind: "textarea", cleanable: true },
+    // ...
+    { name: "daily_activity_time_slot", phase: "12b", inputKind: "text", cleanable: false, defaultValue: "" },
+    // ...
+  ];
+
+  export const ONBOARDING_FUNNEL_COLUMNS = [...]; // for parity with FUNNEL_SHEET_COLUMNS pattern (used by writeOnboardingToDoc for column order)
+  ```
+- **Explanation:** Mirror exactly what `demo-call-config.ts` does — reuse `DemoCallVariable` (DO NOT introduce an `OnboardingCallVariable` interface; the demo skill calls out reuse). Each variable gets `frameworkSemantics` per the synthesis-prompt skill Rule 7. Variables list = the Quick-variable-reference section at the bottom of the rewritten script.
+
+### Phase 2 — `lib/copilot/load-demo-call.ts` (NEW)
+
+- **In-file location:** `samwise-app/lib/copilot/load-demo-call.ts`.
+- **Code (sketch):**
+  ```ts
+  const LOAD_DEMO_CALL_URL = "https://loaddemocall-XXXX-uc.a.run.app"; // FILL after backend deploy
+
+  export interface DemoCallDoc { prospectKey: string; cleaned: Record<string, string>; raw: Record<string, string>; createdAt: number; }
+
+  export async function loadDemoCall(identifier: string): Promise<DemoCallDoc | null> {
+    const res = await fetch(LOAD_DEMO_CALL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.demoCall ?? null;
+  }
+  ```
+- **Explanation:** Thin wrapper. Same shape as `lib/copilot/load-qualification.ts`. Returns `null` on miss/error so the caller can toast cleanly.
+
+### Phase 3 — `lib/copilot/prefill-from-demo-call.ts` (NEW)
+
+- **In-file location:** `samwise-app/lib/copilot/prefill-from-demo-call.ts`.
+- **Code (sketch):**
+  ```ts
+  import type { DemoCallVariable } from "../../app/copilot/onboarding-call-config";
+  import type { DemoCallDoc } from "./load-demo-call";
+  import type { SessionState } from "./session-storage";
+
+  // Name-for-name mapping demo→onboarding. Mirrors QUALIFICATION_TO_DEMO_FIELDS in page.tsx.
+  export const DEMO_TO_ONBOARDING_FIELDS = [
+    "behaviour_to_change", "behaviour_example", "core_motivation", "life_stage_context",
+    "problem_duration_self_reported", "symbolic_anchor_description", "alternatives_tried",
+    "why_alternatives_failed", "feelings_during_relapse", "intention_behind_action",
+    "thoughts_during_relapse", "self_talk_after_relapse", "view_of_their_life_in_that_moment",
+    "consequences_for_them", "grado_de_identificacion", "clinical_picture_description",
+    "biologic_symbolic_analogy", "self_destructive_behaviour",
+  ];
+
+  export function prefillFromDemoCall(args: {
+    demoCall: DemoCallDoc;
+    variables: DemoCallVariable[];
+    setState: (s: SessionState) => void;
+    state: SessionState;
+    cleanCallback: (name: string, raw: string, otherVars: Record<string, string>) => void;
+  }) {
+    // 1. Build fresh state (mirrors handleLoadQualification reset-before-fill, page.tsx).
+    // 2. Write matching fields.
+    // 3. Commit, then fire cleaning per cleanable var.
+  }
+  ```
+- **Explanation:** Mirrors `prefill-from-qualification.ts` exactly. Reset-before-fill (per session-copilot skill section 0).
+
+### Phase 4 — `lib/copilot/load-from-doc.ts` + `lib/copilot/prefill-from-doc-extraction.ts` (NEW)
+
+- **Code (sketch — load-from-doc.ts):**
+  ```ts
+  const EXTRACT_ONBOARDING_FROM_DOC_URL = "https://extractonboardingfromdoc-XXXX-uc.a.run.app";
+
+  export interface DocExtractionPayload { extracted: Record<string, string>; sourceDocId: string; }
+
+  export async function extractOnboardingFromDoc(docLink: string): Promise<DocExtractionPayload | null> {
+    const res = await fetch(EXTRACT_ONBOARDING_FROM_DOC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ googleDocLink: docLink }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+  ```
+- **`prefill-from-doc-extraction.ts`** — pure helper, mirrors `prefill-from-demo-call.ts` but takes the extraction payload shape.
+
+### Phase 5 — `app/copilot/onboarding-prefill-row.tsx` (NEW)
+
+- **Code (sketch):**
   ```tsx
-  const DOC_LINK_STORAGE_KEY = 'ritual-call:docLink';
+  type Mode = "firestore" | "doc" | "manual";
 
-  // Hydrate the doc link from localStorage on first mount so a returning
-  // user does not have to paste their link again. Cold visits stay blank.
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(DOC_LINK_STORAGE_KEY);
-      if (saved) setDocLink(saved);
-    } catch {
-      // localStorage can be unavailable (private mode, blocked storage);
-      // fall through to the blank form — the user can still paste manually.
+  export function OnboardingPrefillRow({ script, state, setState, variables, cleanCallback }: Props) {
+    const [mode, setMode] = useState<Mode>("firestore");
+    const [identifier, setIdentifier] = useState("");      // email/phone/name
+    const [docLink, setDocLink] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    async function handleLoad() {
+      setLoading(true);
+      if (mode === "firestore") {
+        const demoCall = await loadDemoCall(identifier);
+        if (demoCall) prefillFromDemoCall({ demoCall, variables, setState, state, cleanCallback });
+        else toast.error("No demo call on file for this prospect");
+      } else if (mode === "doc") {
+        const payload = await extractOnboardingFromDoc(docLink);
+        if (payload) prefillFromDocExtraction({ payload, variables, setState, state, cleanCallback });
+        else toast.error("Could not extract from doc");
+      }
+      // mode === "manual" → no-op
+      setLoading(false);
     }
-  }, []);
+
+    return (
+      <div className="space-y-2 rounded-md border p-3">
+        <div className="text-sm font-medium">Pre-fill onboarding session</div>
+        <RadioGroup value={mode} onValueChange={setMode}>
+          <RadioGroupItem value="firestore" label="From Firestore (email)" />
+          <RadioGroupItem value="doc" label="From Google Doc URL" />
+          <RadioGroupItem value="manual" label="Manual" />
+        </RadioGroup>
+        {mode === "firestore" && <Input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="prospect@email.com" />}
+        {mode === "doc" && <Input value={docLink} onChange={e => setDocLink(e.target.value)} placeholder="https://docs.google.com/document/d/..." />}
+        {mode !== "manual" && <Button onClick={handleLoad} disabled={loading}>Load</Button>}
+      </div>
+    );
+  }
+  ```
+- **Explanation:** Three radio options. "manual" hides the input + button entirely. UI primitives reuse shadcn `RadioGroup`/`Input`/`Button` already present in the app.
+
+### Phase 6 — `lib/copilot/save-onboarding.ts` + `save-to-doc.ts` + `copy-to-clipboard.ts` (NEW)
+
+- **`save-onboarding.ts`** — POST to new `extractOnboarding` CF, body `{ raw, cleaned, prospectKey }`. Mirrors `append-row.ts`.
+- **`save-to-doc.ts`** — POST to new `writeOnboardingToDoc` CF, body `{ googleDocLink, cleaned, scriptPhases }`.
+- **`copy-to-clipboard.ts`** — pure client:
+  ```ts
+  export function copyOnboardingNotes(args: { cleaned: Record<string, string>; variables: DemoCallVariable[]; }) {
+    const md = renderAsMarkdown(args.cleaned, args.variables); // group by phase, "- {name}: {value}"
+    return navigator.clipboard.writeText(md);
+  }
   ```
 
-  Constant declared at module top, above the component. The try/catch survives storage-disabled browsers (Safari private mode) without breaking the page.
+### Phase 7 — `app/copilot/onboarding-save-row.tsx` (NEW)
 
-- **Code (persistence inside `start`):** add a single line at the top of `start`, right after `setPhase('identifying')`:
+- **Code (sketch):** three checkboxes (Firestore | Doc URL | Clipboard), optional Doc URL input if the Doc checkbox is checked, one "Save" button that fires all selected destinations in parallel and toasts per-destination success.
+- **Explanation:** Checkbox semantics (not radio) — the clinician can save to all three at once.
 
-  ```tsx
-  try { window.localStorage.setItem(DOC_LINK_STORAGE_KEY, docLink); } catch {}
-  ```
+### Phase 8 — `app/copilot/page.tsx` edits
 
-- **Explanation:** writing on `start()` (rather than on every keystroke) keeps the cache as "the link the user actually used", not whatever half-typed value they left behind. Hydration on mount makes the pre-fill behaviour deterministic on the next visit.
+- **In-file location:** `app/copilot/page.tsx`.
+- **Should not be modified:** The qualification-load path. The localStorage restore. The scroll sync.
+- **Edits:**
+  1. Remove the `scriptType !== "demo"` rejection block.
+  2. Compute `const variables = loaded.scriptType === "onboarding" ? ONBOARDING_VARIABLES : DEMO_CALL_VARIABLES;` once after script load.
+  3. Branch the top-of-pane render:
+     ```tsx
+     {loaded.scriptType === "demo"
+       ? <QualifyPrefillRow script={loaded} state={state} setState={setState} />
+       : <OnboardingPrefillRow script={loaded} state={state} setState={setState} variables={variables} cleanCallback={cleanCallback} />}
+     ```
+  4. Branch the save button at the bottom:
+     ```tsx
+     {loaded.scriptType === "demo"
+       ? <DemoSaveButton ... />
+       : <OnboardingSaveRow cleaned={state.cleaned} raw={state.raw} variables={variables} />}
+     ```
+  5. Thread `variables` into `<CopilotSurface>` (or `<VariablesTable>` directly if that's the prop site).
 
-### Phase 1 / Step 2 — Add the Update ritual button
+### Phase 9 — `lib/copilot/session-storage.ts` edits
 
-- **In-file location:** same file. Two edits: (a) a new `updateRitual` callback alongside `endConversation` (around current lines 187–202), and (b) a new button inside `ActiveControls` (around current lines 315–362).
-- **Should not be modified:** the `endConversation` callback itself, the `reconnect` callback, the mic button + spacebar handling inside `ActiveControls`, the `Disconnected` component, the `Status` component, the `PasteLinkForm` component.
-- **Code (new callback inside the component):**
+- Bump v4 → v5.
+- Key is now `copilot:session:v5:${scriptType}` so demo + onboarding sessions persist independently.
+- Mount-restore reads the key matching the just-loaded `scriptType`.
 
-  ```tsx
-  const REGISTER_RITUAL_URL =
-    'https://registernewritual-b6fhjlgejq-uc.a.run.app';
+### Testing phase
 
-  const [isUpdating, setIsUpdating] = useState(false);
+- **Local test (manual, no e2e):**
+  1. `npm run dev` in samwise-app.
+  2. Open /copilot, paste the onboarding Doc URL, click load.
+  3. Verify: scriptType returns `"onboarding"`, phases render, `[CONDITION: grado_de_identificacion=high]` block in Phase 9 toggles correctly when the variable is set.
+  4. Prefill mode A: enter a real prospect's email → variables panel hydrates from demoCall. Spot-check 3 fields.
+  5. Prefill mode B: paste a Google Doc URL with onboarding-relevant notes → variables hydrate from LLM extraction. Spot-check.
+  6. Prefill mode C: refresh page, choose "Manual" → no auto-fill, panel stays empty.
+  7. Save mode A: click Save with Firestore checked → `onboardingSessions/${prospectKey}-${ts}` written. Verify via Firebase console.
+  8. Save mode B: paste a Doc URL → append notes to that doc. Verify in Drive.
+  9. Save mode C: click Save with Clipboard checked → paste into a text editor, verify markdown.
+- **Integration test:** N/A — exercised via the local test against deployed CFs.
+- **Update README:** N/A.
 
-  // POST the cached docLink to the same cloud function the operator
-  // console uses. Does NOT disconnect the room — user keeps talking
-  // and ends the conversation deliberately when ready.
-  const updateRitual = useCallback(async () => {
-    if (!docLink || isUpdating) return;
-    setIsUpdating(true);
-    try {
-      const res = await fetch(REGISTER_RITUAL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ googleDocLink: docLink }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? `Failed (${res.status})`);
-      toast.success('Ritual updated');
-    } catch (err) {
-      toast.error('Could not update ritual', {
-        description: err instanceof Error ? err.message : 'Unknown error.',
-      });
-    } finally {
-      setIsUpdating(false);
-    }
-  }, [docLink, isUpdating]);
-  ```
+### After implementation
 
-  `REGISTER_RITUAL_URL` lives next to the component (matching the pattern in `app/page.tsx`). `toast` is `import { toast } from 'sonner';` — sonner is already used elsewhere in the app.
-
-- **Code (button inside `ActiveControls`):** add a third prop and a button. Pass `onUpdate` and `updating` from the parent. Inside `ActiveControls`, render a new button immediately ABOVE "End conversation":
-
-  ```tsx
-  <button
-    type="button"
-    onClick={onUpdate}
-    disabled={updating}
-    className="rounded-md border border-input px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-foreground hover:text-foreground disabled:opacity-40"
-  >
-    {updating ? 'Updating ritual…' : 'Update ritual'}
-  </button>
-  ```
-
-  Updated `ActiveControls` signature:
-
-  ```tsx
-  function ActiveControls({
-    onMicDown,
-    onMicUp,
-    onUpdate,
-    onEnd,
-    hot,
-    updating,
-  }: {
-    onMicDown: () => void;
-    onMicUp: () => void;
-    onUpdate: () => void;
-    onEnd: () => void;
-    hot: boolean;
-    updating: boolean;
-  }) { … }
-  ```
-
-  At the call site:
-
-  ```tsx
-  {phase === 'active' ? (
-    <ActiveControls
-      onMicDown={() => void setMic(true)}
-      onMicUp={() => void setMic(false)}
-      onUpdate={() => void updateRitual()}
-      onEnd={endConversation}
-      hot={isHot}
-      updating={isUpdating}
-    />
-  ) : null}
-  ```
-
-- **Explanation:** the button is non-destructive — clicking it does not disconnect the room or change phase. Re-clicks are blocked by `isUpdating`. The failure path surfaces the cloud function's error message verbatim via sonner.
-
-### Phase 1 / Step 3 — Remove the "Back to Samwise" header
-
-- **In-file location:** `RitualCallExperience.tsx`, the `<header>` block at current lines 215–227.
-- **Should not be modified:** anything else inside the root `<div>` — the gold glow shadow, the phase-keyed sub-components, the audio sink div.
-- **Code:** delete the entire `<header>…</header>` block. Also remove the now-unused imports: `Link` from `'next/link'` and `ArrowLeft` from `'lucide-react'`. Tsc will fail the build if either remains unused, since the file is in `"use client"` mode and the rest of the file references neither.
-- **Explanation:** the page is now a destination, not a card inside the operator app. Without the header link, the only ways out are "End conversation" (returns to the paste-link form), closing the tab, or typing a different URL — all acceptable for a user-only link.
-
-### Phase 2 / Step 0 — Remove the Create Ritual Doc feature (added mid-implementation)
-
-- **In-file location:** `samwise-app/app/page.tsx`.
-- **What changed:**
-  - Removed the `CREATE_DOC_URL` constant.
-  - Narrowed `type View` from `"create" | "register"` to `"register"`.
-  - Removed the `"create"` entry from `NAV`; default view is now `"register"`.
-  - Removed the `view === "create" && <CreateRitualDocCard />` branch from `<main>`.
-  - Deleted the entire `CreateRitualDocCard` function, the `MetadataForm` / `MetadataField` types, and the `INITIAL_METADATA` constant.
-  - Pruned now-unused imports: `FilePlus`, `ExternalLink`, `User`, `Mic`, `Languages`, `Phone`, `Clock`, and the whole `@/components/ui/select` import block.
-- **Out of scope:** the `createRitualDoc` cloud function itself stays — only the UI advertisement is removed.
-
-### Phase 2 / Step 1 — Remove the Demo Call copilot sidebar entry
-
-- **In-file location:** `samwise-app/app/page.tsx`, the second `SidebarMenuItem` inside the "User experience" SidebarGroup at current lines 129–136.
-- **Should not be modified:** the "Ritual call" entry above it (current lines 121–128), the Operator tools group, the `NAV` constant, any of the form components below the sidebar, the layout, the wordmark, the footer.
-- **Code:** delete the six-line `<SidebarMenuItem>…</SidebarMenuItem>` block that wraps `<Link href="/copilot">`. Leave the surrounding `SidebarMenu` and `SidebarGroupContent` intact. Also remove the now-unused `Sparkles` import iff it is no longer referenced elsewhere in the file. (`Sparkles` is also used as the icon for the "Register Ritual" `NAV` item — Step 0 sanity check before deleting the import.)
-- **Sanity check (run before deleting the import):** `grep -n 'Sparkles' samwise-app/app/page.tsx` — if it still appears in `NAV`, KEEP the import.
-- **Explanation:** the `/copilot` route itself stays — operators with the URL can still reach it; it is just no longer advertised in the user-facing nav. A user landing on `/ritual-call` from their inbox has no chrome leading them to the operator console.
-
----
-
-## Testing phase
-
-### Local test (always)
-
-1. From `samwise-app/`, run `pnpm dev` (or `npm run dev`, matching the project's package-manager-of-record).
-2. Open `http://localhost:3000/`. Verify:
-   - "Ritual call" appears in the User experience sidebar group.
-   - "Demo Call copilot" is **gone** from the sidebar.
-3. Open `http://localhost:3000/ritual-call`. Verify:
-   - No "Back to Samwise" link in the header. The header area is empty (or absent) — the only UI is the paste-link form.
-   - The Doc link input is **blank** (first visit, no localStorage value yet).
-4. Paste a known-good Doc link → click Start.
-5. While the call is `'active'`, verify:
-   - The "Update ritual" button is visible above "End conversation".
-   - Clicking it shows a "Ritual updated" toast (or a descriptive error toast if the cloud function rejects).
-   - The room stays connected — clicking the button does not drop the call or change the visible phase.
-6. End the conversation, refresh the page. Verify:
-   - The paste-link input is **pre-filled** with the link from step 4. (localStorage hydration works.)
-7. Open dev-tools → Application → Local Storage → confirm a `ritual-call:docLink` key holds the URL.
-8. Optional: open the page in a private window → verify the input is blank and the page does not crash (try/catch survives storage-disabled browsers).
-
-### Integration test
-
-After deploying samwise-app to Vercel:
-
-1. Send the production URL `app.samwise.life/ritual-call` to a test user (or open in an incognito browser yourself).
-2. Paste a real Doc that already exists in Firestore. Confirm:
-   - The agent dispatches and joins (same as today — nothing changed in `/api/ritual-call/init`).
-   - Clicking "Update ritual" returns a 200 from `registernewritual-b6fhjlgejq-uc.a.run.app`.
-   - The ritual doc in Firestore reflects the updated `userInputs`/`schedules` content from the latest Doc snapshot.
-
-### Update README
-
-`samwise-app` has no README that documents the ritual-call surface; the canonical reference is the `samwise-app-livekit-integration` skill. Skip a README edit. Skill update is captured under "After implementation" below.
-
----
-
-## After implementation
-
-### Update `samwise-app/context-for-code-agent.md`
-
-Append a Recent Changes entry dated 2026-06-23:
-- `/ritual-call` is now a self-contained user-facing surface. The pasted Doc link is persisted in `localStorage["ritual-call:docLink"]` and hydrated on mount. An "Update ritual" button inside `ActiveControls` POSTs the cached link to `registerNewRitual` without disconnecting the room. The "Back to Samwise" header link was removed so users have no nav into the operator UI. The "Demo Call copilot" sidebar entry was removed from `/`; the `/copilot` route remains reachable by direct URL.
-
-### Update `samwise-app-livekit-integration` skill
-
-In `samwise-app/.claude/skills/samwise-app-livekit-integration/SKILL.md`:
-- Add a short note under "Client-side LiveKit wiring" → "Reusing the same room across multiple sessions" mentioning the localStorage persistence pattern for inputs the user re-uses across sessions.
-- Update the "Sidebar integration" section to drop the second User experience entry from the snippet (only "Ritual call" remains).
-
-### Mark task DONE
-
-User manually marks the corresponding task in the master Vibe doc Projects tab.
-
----
-
-## Explicitly OUT of scope (do not touch this round)
-
-- `ritual_synthesis_prompt.txt` — frozen until a separate task.
-- `samwise-backend/cloud-functions/functions/src/index.ts` (`registerNewRitual`, `createRitualDoc`) — frozen.
-- `samwise-backend/ritual-agent/src/flows/onboarding/agent.ts` — frozen.
-- `google-doc-template.md` — frozen (will be updated alongside the synthesis prompt later).
-- `/api/ritual-call/init/route.ts` — frozen.
-- The LiveKit `Room` wiring (`livekit-dispatch.ts`, audio sink, PTT, room cleanup) — frozen.
-- The `/copilot` route's code — frozen (only its sidebar advertisement is removed).
-- The dispatch-metadata contract between the app and ritual-agent — frozen.
+- Update `samwise-app/context-for-code-agent.md` "Module Structure" section to list the new files.
+- Update `samwise-session-copilot` skill (in `Documents/samwise/.claude/skills/`) — section 8 "Demo Call only in v1" → flip to "Demo + Onboarding"; add the new prefill/save pattern.
+- Mark task DONE in master Vibe doc Projects tab (manual user step).

@@ -25,8 +25,13 @@ export interface CopilotSurfaceProps {
   docUrl: string
   script: LoadedScript
   /** Optional ReactNode rendered above the variables table. /copilot
-   * uses this to mount its manual qualification-prefill row. */
+   * uses this to mount its manual qualification-prefill row (demo
+   * mode) or OnboardingPrefillRow (onboarding mode). */
   topSlot?: ReactNode
+  /** Optional ReactNode that REPLACES the default "Save call" button
+   * inside VariablesTable. Onboarding mode passes OnboardingSaveRow
+   * here for three-destination save (Firestore + Doc + clipboard). */
+  saveOverride?: ReactNode
 }
 
 export function CopilotSurface({
@@ -36,6 +41,7 @@ export function CopilotSurface({
   docUrl,
   script,
   topSlot,
+  saveOverride,
 }: CopilotSurfaceProps) {
   return (
     <main className="grid h-screen grid-cols-[minmax(380px,1fr)_2fr]">
@@ -49,6 +55,7 @@ export function CopilotSurface({
           setState={setState}
           docUrl={docUrl}
           script={script}
+          saveOverride={saveOverride}
         />
       </section>
       <section className="overflow-auto">

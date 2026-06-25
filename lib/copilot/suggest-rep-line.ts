@@ -1,7 +1,7 @@
 // Client wrapper for the suggestRepLine cloud function.
 // Cross-origin call — CORS is enabled on the cloud function side.
 
-import type { DemoCallVariable } from "@/app/copilot/demo-call-config"
+import type { DemoCallVariable } from "@/app/for-experts/demo-call-config"
 import type { SessionState, SuggestionEntry } from "./session-storage"
 
 // Update this constant if Firebase assigns a different hash on first

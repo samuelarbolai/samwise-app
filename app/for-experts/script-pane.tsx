@@ -177,7 +177,7 @@ function filterBlocksByCondition(
 // reads the script. Simple direct mapping: scroll to the matching
 // vars-phase-{n} if it exists; no-op otherwise. This is "what is the
 // rep reading right now," not "what variable do they want to fix."
-function scrollVarsToPhase(phaseNumber: LoadedPhase["number"]) {
+function scrollVarsToPhase(phaseNumber: LoadedPhase["number"] | string) {
   const target = document.getElementById(`vars-phase-${String(phaseNumber)}`)
   target?.scrollIntoView({ behavior: "smooth", block: "start" })
 }
