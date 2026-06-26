@@ -1,13 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { Sparkles, PhoneCall, ScrollText } from "lucide-react"
+import { Sparkles, PhoneCall, ScrollText, Map } from "lucide-react"
 
 import { RegisterRitualCard } from "@/components/register-ritual-card"
+import { BehaviouralDesignExperience } from "@/components/behavioural-design/BehaviouralDesignExperience"
 import { RitualCreationExperience } from "@/components/ritual-creation/RitualCreationExperience"
 import { RitualCallExperience } from "@/components/ritual-call/RitualCallExperience"
 
-type View = "register" | "build-ritual" | "ritual-call"
+type View = "register" | "behavioural-picture" | "build-ritual" | "ritual-call"
 
 interface NavItem {
   id: View
@@ -17,6 +18,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { id: "register", label: "Register Ritual", icon: Sparkles },
+  { id: "behavioural-picture", label: "Behavioural picture", icon: Map },
   { id: "build-ritual", label: "Build ritual", icon: ScrollText },
   { id: "ritual-call", label: "Ritual call", icon: PhoneCall },
 ]
@@ -53,6 +55,7 @@ export default function RegisterRitualPage() {
             <RegisterRitualCard />
           </div>
         )}
+        {view === "behavioural-picture" && <BehaviouralDesignExperience />}
         {view === "build-ritual" && <RitualCreationExperience />}
         {view === "ritual-call" && <RitualCallExperience />}
       </main>
