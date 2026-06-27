@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { FileText, Send, Headphones, Sparkles } from "lucide-react"
+import { FileText, Send, Headphones, Sparkles, Wand2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { RegisterRitualCard } from "@/components/register-ritual-card"
+import { BuildCustomScriptCard } from "@/components/build-custom/build-custom-script-card"
 
 import {
   DEFAULT_DEMO_SCRIPT_DOC_URL,
@@ -57,7 +58,7 @@ function configForScriptType(
   return null
 }
 
-type ExpertView = "copilot" | "register"
+type ExpertView = "copilot" | "register" | "build-custom"
 
 export default function ForExpertsPage() {
   const [view, setView] = useState<ExpertView>("copilot")
@@ -103,48 +104,14 @@ export default function ForExpertsPage() {
     }
   }
 
-  // Loaded copilot surface takes over the full viewport (the 2-col
-  // grid needs all the horizontal space). The sidebar shell wraps the
-  // URL gate AND the Register Ritual view — both are page-sized forms.
+  // Sidebar shell is the persistent frame. All views (Copilot URL gate,
+  // loaded Copilot surface, Register Ritual, Build custom samwise) render
+  // INSIDE it so the sidebar is always reachable. The copilot used to
+  // take over the full viewport on load; that was removed 2026-06-26 per
+  // user request — sidebar nav must stay one click away even mid-call.
   const copilotLoaded = view === "copilot" && script && state
   const config = copilotLoaded ? configForScriptType(script!.scriptType) : null
 
-  if (copilotLoaded && config) {
-    return (
-      <CopilotSurface
-        variables={config.variables}
-        state={state!}
-        setState={setState}
-        docUrl={docUrl}
-        script={script!}
-        topSlot={
-          config.mode === "onboarding" ? (
-            <OnboardingPrefillRow script={script!} setState={setState} />
-          ) : (
-            <QualifyPrefillRow script={script!} setState={setState} />
-          )
-        }
-        saveOverride={
-          config.mode === "onboarding" ? (
-            <OnboardingSaveRow state={state!} variables={config.variables} />
-          ) : undefined
-        }
-      />
-    )
-  }
-
-  if (copilotLoaded && !config) {
-    // Should be unreachable — handleLoad guards. Defensive fallback.
-    return (
-      <main className="p-8 text-center">
-        <p>Unsupported scriptType: {script!.scriptType}</p>
-      </main>
-    )
-  }
-
-  // Sidebar shell — wraps the URL gate (Copilot view, no script yet)
-  // AND the Register Ritual view (therapists registering rituals for
-  // their own users without leaving the for-experts shell).
   return (
     <SidebarProvider>
       <Sidebar collapsible="offcanvas">
@@ -181,6 +148,16 @@ export default function ForExpertsPage() {
                     <span>Register Ritual</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "build-custom"}
+                    onClick={() => setView("build-custom")}
+                    tooltip="Build custom samwise script"
+                  >
+                    <Wand2 className="h-4 w-4" />
+                    <span>Build custom samwise</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -203,14 +180,55 @@ export default function ForExpertsPage() {
                   for behavioural experts
                 </span>
               </>
-            ) : (
+            ) : view === "register" ? (
               "Register Ritual"
+            ) : (
+              <>
+                Build custom samwise{" "}
+                <span className="text-muted-foreground font-normal">
+                  · adapt to your framework
+                </span>
+              </>
             )}
           </h1>
         </header>
 
-        <main className="flex flex-1 flex-col items-center justify-start p-4 py-12">
-          {view === "copilot" && (
+        <main
+          className={
+            copilotLoaded || view === "build-custom"
+              ? "flex flex-1 flex-col"
+              : "flex flex-1 flex-col items-center justify-start p-4 py-12"
+          }
+        >
+          {view === "copilot" && copilotLoaded && config && (
+            <CopilotSurface
+              variables={config.variables}
+              state={state!}
+              setState={setState}
+              docUrl={docUrl}
+              script={script!}
+              topSlot={
+                config.mode === "onboarding" ? (
+                  <OnboardingPrefillRow script={script!} setState={setState} />
+                ) : (
+                  <QualifyPrefillRow script={script!} setState={setState} />
+                )
+              }
+              saveOverride={
+                config.mode === "onboarding" ? (
+                  <OnboardingSaveRow state={state!} variables={config.variables} />
+                ) : undefined
+              }
+            />
+          )}
+
+          {view === "copilot" && copilotLoaded && !config && (
+            <p className="p-8 text-center text-sm text-muted-foreground">
+              Unsupported scriptType: {script!.scriptType}
+            </p>
+          )}
+
+          {view === "copilot" && !copilotLoaded && (
             <div className="w-full max-w-lg">
               <FieldGroup>
                 <Field>
@@ -271,6 +289,8 @@ export default function ForExpertsPage() {
           )}
 
           {view === "register" && <RegisterRitualCard />}
+
+          {view === "build-custom" && <BuildCustomScriptCard />}
         </main>
       </SidebarInset>
     </SidebarProvider>

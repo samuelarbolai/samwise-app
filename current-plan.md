@@ -1,312 +1,772 @@
-# current-plan.md — Onboarding mode in /copilot (frontend)
+# current-plan.md — Document-focused Agent: therapist builds their own Samwise
 
-> Overwrites the previous plan ("/ritual-call + Update ritual button" — shipped, separate task in the master Vibe doc).
-> Neurotic-implementer rules in force. Minimal-changes-only mandate: nothing in the demo-mode path moves unless it is strictly necessary to make onboarding mode coexist.
-> Backend half lives in `samwise-backend/cloud-functions/current-plan.md`. The two plans are siblings — both must ship for /copilot to work in onboarding mode.
+> **Overwrites the previous plan** ("Onboarding mode in /copilot" — SHIPPED and live as of 2026-06-24).
+> **Status: PROPOSAL ONLY. No file edits yet.** Awaiting explicit "go" before any code or Doc is created.
+> **Touches three repos:** `samwise-app` (anchor, this file), `samwise-backend/cloud-functions` (synthesizer), `samwise-backend/ritual-agent` (voice-refine — deferred).
+> **Spans phases A–F**; only A–D ship in this task. E–F (voice-refine, quick fit test) are explicitly deferred per the user's answers. Canon spec is also deferred — emerges from running the procedure on a real example.
+> **Mirror discipline applies** to the surface (mirror `RegisterRitualCard` + the `/for-experts` sidebar view-state pattern) and to the cloud function (mirror `createRitualDoc`'s `drive.files.copy + docs.batchUpdate` pattern verbatim).
 
 ## Plan Summary
 
-Extend /copilot to render the **onboarding** script as a first-class second mode, sitting beside the existing demo mode. The script Doc is the new onboarding script (`1FrglmnZGDlFS7S89LgaKjKpDiRLEPGxkAYtOomjT08E`) carrying `[TYPE: onboarding]`.
+A therapist who is curious about Samwise can produce their **own custom Samwise script Doc** by feeding the system their framework material (PDF, URL, or pasted text). The flow:
 
-Three load modes — clinician picks one per session:
-1. **Firestore by email** → look up most recent `demoCalls` doc for that prospectKey via a new `loadDemoCall` CF; hydrate matching onboarding variables.
-2. **Google Doc URL** → CF + Gemini reads any doc the clinician points at (demo transcript, intake notes, anything) and extracts the onboarding variable set.
-3. **Manual** → clinician types into the variables panel directly. (No prefill click; the default state.)
+1. Therapist opens `/for-experts` → clicks new sidebar item **"Build custom samwise"** (third sibling to "Copilot" and "Register Ritual"; same view-state pattern, no route change).
+2. They either (a) **paste their own framework material** (PDF / URL / textarea) to produce a NEW custom samwise script Doc, OR (b) **paste a previously-generated Doc link** to continue iterating on it (mirrors `/ritual-call`'s doc-link hydration pattern).
+3. The "produce a new Doc" path POSTs to a new cloud function `synthesizeCustomScript` (samwise-backend/cloud-functions), which: ingests the framework material, reads the **Samwise Adaptation Procedure Google Doc** (the canonical procedure that defines how to adapt Samwise to any framework), copies the **Samwise Custom Script Template Google Doc** into a parent folder, fills the copy by walking the procedure with Gemini, and returns `{ documentId, documentUrl }`.
+4. The therapist gets the Doc link, opens it in Google Docs, edits freely, and can return to `/for-experts` later to re-hydrate by pasting the same link.
+5. (Phase E, deferred) — a voice-refine flow in `ritual-agent` walks the therapist through reviewing/refining the draft conversationally, mirroring `ritual-design`.
+6. (Phase F, deferred) — a quick fit test surface lets the therapist run their custom script in a copilot-sandbox without recruiting a real patient.
 
-Three save modes — clinician picks any subset at end of session:
-1. **Firestore** → writes to `onboardingSessions/${prospectKey}-${Date.now()}` via new `extractOnboarding` CF. Mirrors `extractDemoCall` rep_state mode.
-2. **Google Doc URL** → clinician pastes a Doc URL at save time, CF appends the cleaned notes block to that doc.
-3. **Clipboard** → pure-client formatter dumps the cleaned values as markdown for paste-anywhere.
+The whole synthesis is anchored on TWO Google Docs the user co-authors with Claude in Phase A:
 
-The branching driver is `scriptType: "onboarding"` returned by the existing `loadCallScript` CF (it already detects this from `[TYPE: onboarding]` — no backend change to script load). The frontend rejection in `app/copilot/page.tsx` is lifted in favor of a config-router.
+- **Samwise Adaptation Procedure** — the human-readable procedure that defines: what is canonical Samwise (variables, phases, mandatory beats, vocabulary blacklist) and what is swappable (framework-specific metaphors, exercises, ordering). Lives as a Google Doc so it iterates live without redeploy. The synthesizer reads it on every call via Drive API.
+- **Samwise Custom Script Template** — a **funnel-wide manifest Google Doc** with one section per Samwise surface (Qualification prompts / Demo Call / Onboarding / Behavioural-design "Possible Origins" tab spec / Call Design / Daily AI agent prompts). Each section preserves its parent surface's structural conventions verbatim (`[SAY]/[/SAY]` markers, `Phase N — title` headers, `[TYPE: …]` and `[END]` markers, `{{variable}}` slots). The synthesizer `drive.files.copy`'s the manifest for every new therapist, then fills the `[PLACEHOLDERS]` via `docs.batchUpdate`. Mirrors the canonical-template pattern of `createRitualDoc` and `RITUAL_TEMPLATE_DOC_ID` — just bigger. Single Doc keeps v0 simple; therapist gets one link and scrolls.
+
+  **Why funnel-wide, not Demo-only:** real frameworks have components that land at DIFFERENT points in the funnel, not all at Phase 8 of the Demo. Established example (Phase B, CPT): Impact Statement enriches the Qualification capture, Trauma Account replaces the Possible Origins map (Onboarding/behavioural-design), Worksheets land in TWO slots simultaneously (Phase 8 mantra construction AND the Optimization session as a recovery tool). A Demo-only template would have nowhere to put 4 of those 5 placements.
+
+**No new infra primitives.** The synthesizer reuses the cloud-functions module's lazy Google auth singletons (`getDriveClient`, `getDocsClient`), the same `FIREBASE_SERVICE_ACCOUNT` secret, and the same Gemini setup that `cleanVariable` / `extractDemoCall` already use. Three new env vars: `SAMWISE_PROCEDURE_DOC_ID`, `SAMWISE_TEMPLATE_DOC_ID`, `SAMWISE_CUSTOM_PARENT_FOLDER_ID`.
+
+**Aesthetic / UX discipline.** Mirror `RegisterRitualCard` exactly — `<FieldGroup>` / `<Field>` / `<Input>` / `<Textarea>` / `<Button>`, no `<Card>` wrapper, no icon-in-circle. Three input modes selectable via radio (Text / URL / PDF). Single "Build custom samwise script" submit button. Below that, a second `<FieldGroup>` for the "Continue from existing Doc" path: paste link → caches to localStorage (no Drive read needed at this surface — the link itself is the artifact). localStorage caches the last-built Doc URL so a returning therapist sees it on mount.
 
 ## Plan Architecture (Flow)
 
 ```
-                    ┌─────────────────────────────────────────────┐
-                    │ /copilot page.tsx — scriptType router       │
-                    └───┬─────────────────────────┬───────────────┘
-                        │                         │
-              scriptType=demo              scriptType=onboarding
-                        │                         │
-                ┌───────▼──────┐         ┌────────▼─────────────┐
-                │ demo-call-   │         │ onboarding-call-     │
-                │ config.ts    │         │ config.ts (NEW)      │
-                │ (unchanged)  │         │                      │
-                └──────────────┘         └──────────────────────┘
-                                                  │
-                ┌─────────────────────────────────┴──────────────┐
-                │                                                │
-        ┌───────▼──────────┐                          ┌──────────▼──────────┐
-        │ Prefill row      │                          │ Save row            │
-        │ (NEW component)  │                          │ (NEW component)     │
-        ├──────────────────┤                          ├─────────────────────┤
-        │ Firestore email→ │                          │ Firestore           │
-        │   loadDemoCall   │                          │   extractOnboarding │
-        │ Doc URL →        │                          │ Doc URL →           │
-        │   extractOnboar- │                          │   writeOnboarding-  │
-        │   dingFromDoc    │                          │   ToDoc             │
-        │ Manual (no-op)   │                          │ Clipboard (client)  │
-        └──────────────────┘                          └─────────────────────┘
+                       ┌─────────────────────────────────────────────┐
+                       │  /for-experts  page.tsx                     │
+                       │  ExpertView = "copilot" | "register"        │
+                       │                       | "build-custom" (NEW)│
+                       └────┬──────────┬───────────────┬─────────────┘
+                            │          │               │
+                       copilot     register       build-custom
+                            │          │               │
+                            │     <RegisterRitual─┐    │
+                            │      Card />        │    ▼
+                            │                     │  ┌──────────────────────────────────┐
+                            │                     │  │ <BuildCustomScriptCard /> (NEW)  │
+                            │                     │  │  • Mode: Text | URL | PDF        │
+                            │                     │  │  • Submit → POST                 │
+                            │                     │  │    synthesizeCustomScript        │
+                            │                     │  │  • OR paste existing Doc link    │
+                            │                     │  │    → hydrates from localStorage  │
+                            │                     │  └──────────┬───────────────────────┘
+                            │                     │             │
+                            │                     │             ▼
+                            │                     │   ┌─────────────────────────────────┐
+                            │                     │   │  cloud-functions:               │
+                            │                     │   │  synthesizeCustomScript (NEW)   │
+                            │                     │   │  1. Extract framework text      │
+                            │                     │   │     (PDF → pdf-parse, URL →     │
+                            │                     │   │     fetch + readability, text)  │
+                            │                     │   │  2. drive.export(               │
+                            │                     │   │     SAMWISE_PROCEDURE_DOC_ID)   │
+                            │                     │   │  3. drive.files.copy(           │
+                            │                     │   │     SAMWISE_TEMPLATE_DOC_ID)    │
+                            │                     │   │     → newDocId                  │
+                            │                     │   │  4. Gemini fill: walk procedure │
+                            │                     │   │     + framework text + template │
+                            │                     │   │     → batchUpdate replaceAllText│
+                            │                     │   │  5. Return { documentId,        │
+                            │                     │   │     documentUrl }               │
+                            │                     │   └─────────────────────────────────┘
+                            │                     │             │
+                            │                     │             ▼
+                            │                     │   ┌──────────────────────────────────┐
+                            │                     │   │  Per-therapist Samwise Doc       │
+                            │                     │   │  (owned by SA, in parent folder, │
+                            │                     │   │  Editor-shared to therapist email│
+                            │                     │   │  if provided)                    │
+                            │                     │   └──────────────────────────────────┘
+                            │
+                       (existing — unchanged)
 ```
 
-All three NEW cloud functions live in cloud-functions; the frontend speaks to them via thin `lib/copilot/*.ts` wrappers (mirrors existing demo path).
+**Hydration path** (returning therapist):
+
+- Therapist pastes their previously-generated Doc URL into the "Continue from existing Doc" Field on `BuildCustomScriptCard`.
+- The card writes it to `localStorage` under `custom-script:last-doc` (mirrors `/ritual-call`'s doc-link hydration), then renders an "Open in Docs" link + (Phase D.3 optional) a "Load into Copilot" button.
+- "Load into Copilot" sets `view` back to `"copilot"`, pastes the URL into the URL gate, and triggers the existing `loadCallScript` flow — the custom script renders in `/for-experts` exactly like any other script (it parses `[TYPE: custom]`; for v0 the template carries demo's structural shape so demo-mode rendering falls through cleanly — a `[TYPE: custom]` first-class config router is a Phase F follow-up).
 
 ## Plan Structure (Directories and files)
 
-**NEW:**
-- `app/copilot/onboarding-call-config.ts` — variable set, `frameworkSemantics`, phase metadata for onboarding.
-- `app/copilot/onboarding-prefill-row.tsx` — three-mode prefill UI (Firestore email | Doc URL | Manual).
-- `app/copilot/onboarding-save-row.tsx` — three-mode save UI with checkboxes (Firestore | Doc URL | Clipboard).
-- `lib/copilot/load-demo-call.ts` — wrapper for new `loadDemoCall` CF (Firestore-by-email).
-- `lib/copilot/load-from-doc.ts` — wrapper for new `extractOnboardingFromDoc` CF.
-- `lib/copilot/save-onboarding.ts` — wrapper for new `extractOnboarding` CF.
-- `lib/copilot/save-to-doc.ts` — wrapper for new `writeOnboardingToDoc` CF.
-- `lib/copilot/copy-to-clipboard.ts` — pure-client markdown formatter + `navigator.clipboard.writeText`.
-- `lib/copilot/prefill-from-demo-call.ts` — pure helper that takes a `DemoCallDoc` and writes into `SessionState` (mirrors `prefill-from-qualification.ts`).
-- `lib/copilot/prefill-from-doc-extraction.ts` — pure helper that takes the doc-extracted payload and writes into `SessionState`.
+```
+samwise-app/
+├── current-plan.md                                # THIS FILE
+├── app/
+│   └── for-experts/
+│       └── page.tsx                               # MODIFIED — extend ExpertView union (1 line) + sidebar
+│                                                  # item (~8 lines) + view block (1 line) + header label
+│                                                  # (1 line). Nothing else in this file moves.
+└── components/
+    └── build-custom-script-card.tsx               # NEW — self-contained card, mirror of <RegisterRitualCard>'s
+                                                  # shape (no Card wrapper, FieldGroup / Field / Input /
+                                                  # Textarea / Button only). Owns its own state + fetch.
 
-**EDITED:**
-- `app/copilot/page.tsx`:
-  - Lift the `scriptType !== "demo"` rejection.
-  - Branch on `loaded.scriptType`: render `<QualifyPrefillRow>` + demo config when `demo`; render `<OnboardingPrefillRow>` + onboarding config when `onboarding`.
-  - Swap Save button: render `<OnboardingSaveRow>` (the multi-target one) when in onboarding mode.
-- `lib/copilot/session-storage.ts`:
-  - Bump key from `copilot:session:v4` → `v5` and namespace by `scriptType` (`copilot:session:v5:demo` / `copilot:session:v5:onboarding`) so loading two different docs in the same browser doesn't bleed state.
-- `lib/copilot/append-row.ts`: NO CHANGE. Demo Save path stays as-is.
-- `app/copilot/copilot-surface.tsx`: NO CHANGE if it already accepts the variables-config as a prop. If it hardcodes `DEMO_CALL_VARIABLES`, add a `variables` prop and thread through (one-line change site each).
+samwise-backend/
+└── cloud-functions/
+    └── functions/
+        ├── src/
+        │   └── index.ts                           # MODIFIED — append `synthesizeCustomScript` export at the
+        │                                          # end of the cloud functions list (after extractTrackingKpis
+        │                                          # at line ~3216). NO refactor of existing fns; no shared
+        │                                          # helper extraction. Mirror createRitualDoc verbatim.
+        └── package.json                           # MODIFIED — add `pdf-parse` + `@mozilla/readability` +
+                                                  # `jsdom` dependencies. No version bumps elsewhere.
 
-**UNCHANGED (load-bearing):**
-- `app/copilot/variables-table.tsx` — accepts `variables` via prop already.
-- `app/copilot/script-pane.tsx` — type-agnostic.
-- `app/copilot/demo-call-config.ts`.
-- `lib/copilot/clean-variable.ts`, `lib/copilot/suggest-rep-line.ts`, `lib/copilot/load-script.ts`.
+Google Docs (created collaboratively in Phase A, owned by the user):
+- Samwise Adaptation Procedure   — id captured in cloud-functions/.env as SAMWISE_PROCEDURE_DOC_ID
+- Samwise Custom Script Template — id captured in cloud-functions/.env as SAMWISE_TEMPLATE_DOC_ID
+
+Google Drive folder (created collaboratively in Phase B.4, owned by the user, Editor-shared to the SA):
+- "Samwise Custom Scripts" parent folder — id captured in cloud-functions/.env as
+  SAMWISE_CUSTOM_PARENT_FOLDER_ID
+```
+
+No new env vars on Vercel (samwise-app stays a thin client). All secrets stay in cloud-functions's `.env`. The service account already has Drive/Docs Editor permissions for the existing ritual template/parent — same trust model applies here: the user shares the new template Doc + parent folder with the service account email at the time of creation.
 
 ## Modifications (in phases and steps)
 
-### Phase 0 — Pre-flight (manual)
+### Phase A — The Samwise Adaptation Procedure Doc (collaborative)
 
-The user must:
-1. Confirm backend plan (`samwise-backend/cloud-functions/current-plan.md`) before any frontend lib wrappers can compile (they import URL constants).
-2. After backend deploy, paste the deployed CF URLs into the wrapper files (same convention as `loadqualification-b6fhjlgejq-uc.a.run.app`).
+**No code in this phase.** I scaffold a Google Doc with section headers and rough content drawn from `samwise-script-work` skill + the existing scripts; the user iterates the wording and decides what is canonical.
 
-### Phase 1 — `onboarding-call-config.ts` (NEW)
+**Step A.1 — Create the Google Doc**
 
-- **In-file location:** `app/copilot/onboarding-call-config.ts`.
-- **Should not be modified:** `demo-call-config.ts`, `DemoCallVariable` interface — REUSE the interface; do not fork.
-- **Code (sketch):**
-  ```ts
-  import type { DemoCallVariable } from "./demo-call-config";
+- **Where:** Google Drive, sibling of the existing Samwise Ritual Template Doc. Title: `Samwise Adaptation Procedure`.
+- **Should NOT be modified:** the existing master Vibe doc (`10PED7oJeRhUqvZTT6ubUFC2QAYMcFkRFpGkPlFmMkgI`) or the Samwise script Docs (Demo, Onboarding, Call Design) — those stay untouched in this phase.
+- **Action:** the user creates the Doc, shares the id with me, and shares the Doc with the service account email as Reader. I scaffold the initial content (A.2).
 
-  export const DEFAULT_ONBOARDING_DOC_URL =
-    "https://docs.google.com/document/d/1FrglmnZGDlFS7S89LgaKjKpDiRLEPGxkAYtOomjT08E/edit";
+**Step A.2 — Scaffold initial content (I draft, user reviews)**
 
-  export const ONBOARDING_VARIABLES: DemoCallVariable[] = [
-    // pre-session (from demo) — phase: "pre-call"
-    { name: "behaviour_to_change", phase: "pre-call", inputKind: "textarea", cleanable: true, frameworkSemantics: "..." },
-    { name: "behaviour_example", phase: "pre-call", inputKind: "textarea", cleanable: true, frameworkSemantics: "..." },
-    { name: "core_motivation", phase: "pre-call", inputKind: "textarea", cleanable: true },
-    // ... (full set per the rewritten script's variable reference section)
-    // phase 2-4
-    { name: "problem_start_timeline", phase: "2", inputKind: "textarea", cleanable: true },
-    // ...
-    { name: "framework_metaphor", phase: "3", inputKind: "select", options: ["gripa", "enemy", "other"], cleanable: false },
-    // ...
-    { name: "enemy_name", phase: "4a", inputKind: "text", cleanable: true },
-    // ...
-    // phase 9 — `[CONDITION:]` driver
-    { name: "unsettling_reality", phase: "9", inputKind: "textarea", cleanable: true },
-    // ...
-    { name: "daily_activity_time_slot", phase: "12b", inputKind: "text", cleanable: false, defaultValue: "" },
-    // ...
-  ];
-
-  export const ONBOARDING_FUNNEL_COLUMNS = [...]; // for parity with FUNNEL_SHEET_COLUMNS pattern (used by writeOnboardingToDoc for column order)
+- **Initial section outline** (content drafted by me, reviewed and tightened by the user before being declared canonical):
   ```
-- **Explanation:** Mirror exactly what `demo-call-config.ts` does — reuse `DemoCallVariable` (DO NOT introduce an `OnboardingCallVariable` interface; the demo skill calls out reuse). Each variable gets `frameworkSemantics` per the synthesis-prompt skill Rule 7. Variables list = the Quick-variable-reference section at the bottom of the rewritten script.
+  # Samwise Adaptation Procedure
 
-### Phase 2 — `lib/copilot/load-demo-call.ts` (NEW)
+  ## 0. What this document is
+  A repeatable procedure for adapting Samwise to a therapist's existing framework
+  (CPT, Brief Strategic, ITAA 12-steps, anything else). Read by humans AND by the
+  synthesizeCustomScript cloud function. Edit live — no redeploy required.
 
-- **In-file location:** `samwise-app/lib/copilot/load-demo-call.ts`.
-- **Code (sketch):**
-  ```ts
-  const LOAD_DEMO_CALL_URL = "https://loaddemocall-XXXX-uc.a.run.app"; // FILL after backend deploy
+  ## 1. What is canonical Samwise (NEVER swap out)
+  - The 4-beat call structure (Exit from the day / Entry into the work /
+    Intentions / The pact).
+  - Variables that must always exist:
+      enemy_name, scary_reality, unsettling_reality, behaviour_to_change,
+      core_motivation, symbolic_anchor_description, helpers_list, …
+    (Full list extracted from samwise-script-work skill — confirm with user.)
+  - Mandatory beats: Phase 1.5 reflection, Phase 5b 9-step structure,
+    admission-test scarcity beats, the Phase 11 verdict line.
+  - Vocabulary blacklist (Rule 7): paciente / comportamiento autodestructivo /
+    recaída / terapia → forbidden in spoken text.
+  - The mission framing: "help the user decide whether to help themselves."
 
-  export interface DemoCallDoc { prospectKey: string; cleaned: Record<string, string>; raw: Record<string, string>; createdAt: number; }
+  ## 2. What is swappable per framework
+  - Framework-specific metaphors (CPT's "stuck points", ITAA's "the disease",
+    Brief Strategic's "attempted solutions" — pick the framework's own language).
+  - The teaching content in Phase 6 (how the framework explains the loop).
+  - The exercises in Phase 8 (mantra construction vs. cognitive worksheet vs.
+    step-9 amends list vs. paradoxical injunction, depending on framework).
+  - The closing reframe in Phase 12 (in the framework's own terms).
 
-  export async function loadDemoCall(identifier: string): Promise<DemoCallDoc | null> {
-    const res = await fetch(LOAD_DEMO_CALL_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier }),
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.demoCall ?? null;
-  }
+  ## 3. The synthesis procedure (what the LLM does, step by step)
+  Step 1: Read the framework material. Identify:
+    - The framework's name for the problem ("addiction", "stuck pattern", …)
+    - The framework's primary metaphor or model
+    - The framework's signature exercise or intervention
+    - The framework's stance on the user's agency (high / medium / low)
+  Step 2: Map each canon variable to the framework's vocabulary.
+    - enemy_name → the framework's term for the antagonist
+    - scary_reality → the framework's term for the problem state
+    - …
+  Step 3: For each [PLACEHOLDER] in the Custom Script Template, write a
+    framework-specific phrasing that preserves the canon beat's intent.
+  Step 4: Sweep for vocabulary blacklist violations (Rule 7) — never let a
+    framework's own term reintroduce paciente / recaída / etc. into spoken text.
+  Step 5: Output is the FILLED template Doc.
+
+  ## 4. Worked examples (Phase B will fill these by hand)
+  ### 4.1 CPT (Cognitive Processing Therapy)
+  …filled in Phase B…
+  ### 4.2 ITAA 12-steps
+  …filled in Phase B…
+
+  ## 5. Hard constraints the LLM must check itself against
+  - Did I keep the 4-beat call structure intact? (Y/N)
+  - Did I keep every mandatory beat? (Y/N)
+  - Did I sweep the spoken text for paciente / recaída / comportamiento
+    autodestructivo / terapia? (Y/N)
+  - Did I preserve every {{variable}} slot exactly? (Y/N)
   ```
-- **Explanation:** Thin wrapper. Same shape as `lib/copilot/load-qualification.ts`. Returns `null` on miss/error so the caller can toast cleanly.
+- **Explanation:** §1 is the load-bearing canon list. §5 is what the LLM runs in its head before returning. §4 is empty in Phase A; we fill it during Phase B by doing it manually.
 
-### Phase 3 — `lib/copilot/prefill-from-demo-call.ts` (NEW)
+**Step A.3 — Capture the Doc id**
 
-- **In-file location:** `samwise-app/lib/copilot/prefill-from-demo-call.ts`.
-- **Code (sketch):**
-  ```ts
-  import type { DemoCallVariable } from "../../app/copilot/onboarding-call-config";
-  import type { DemoCallDoc } from "./load-demo-call";
-  import type { SessionState } from "./session-storage";
+- Doc id goes into `samwise-backend/cloud-functions/.env` (or `firebase functions:secrets:set`) as `SAMWISE_PROCEDURE_DOC_ID`. No code change here — just the env entry; we wire it in Phase C.
 
-  // Name-for-name mapping demo→onboarding. Mirrors QUALIFICATION_TO_DEMO_FIELDS in page.tsx.
-  export const DEMO_TO_ONBOARDING_FIELDS = [
-    "behaviour_to_change", "behaviour_example", "core_motivation", "life_stage_context",
-    "problem_duration_self_reported", "symbolic_anchor_description", "alternatives_tried",
-    "why_alternatives_failed", "feelings_during_relapse", "intention_behind_action",
-    "thoughts_during_relapse", "self_talk_after_relapse", "view_of_their_life_in_that_moment",
-    "consequences_for_them", "grado_de_identificacion", "clinical_picture_description",
-    "biologic_symbolic_analogy", "self_destructive_behaviour",
-  ];
+### Phase B — Worked example: produce ONE custom script Doc by hand
 
-  export function prefillFromDemoCall(args: {
-    demoCall: DemoCallDoc;
-    variables: DemoCallVariable[];
-    setState: (s: SessionState) => void;
-    state: SessionState;
-    cleanCallback: (name: string, raw: string, otherVars: Record<string, string>) => void;
-  }) {
-    // 1. Build fresh state (mirrors handleLoadQualification reset-before-fill, page.tsx).
-    // 2. Write matching fields.
-    // 3. Commit, then fire cleaning per cleanable var.
-  }
+**No code in this phase.** I (Claude) act as the synthesizer; the user reviews. Picks ONE framework that stress-tests the procedure.
+
+**Step B.1 — Choose the framework**
+
+- I propose three candidates (e.g. **ITAA 12-steps**, **CPT**, **Brief Strategic Therapy**) with a one-line rationale each. User picks one. I fetch source material (a public PDF or URL of canonical framework content).
+
+**Step B.2 — Run the procedure manually**
+
+- I follow §3 of the Adaptation Procedure Doc step by step against the framework material, producing a candidate per-therapist Samwise script DRAFT in a fresh Google Doc.
+- The user reviews. We iterate until the draft passes §5's self-checks.
+- Anything I had to invent or guess (because the procedure was vague) gets added BACK into the procedure as a sharpening edit — **Phase A's Doc evolves**.
+
+**Step B.3 — Extract the Custom Script Template Doc (manifest-shaped)**
+
+- Once the worked example is solid, I produce the **Samwise Custom Script Template Doc** by stripping framework-specific content out of the worked example and leaving a funnel-wide manifest with ONE Doc-level `[TYPE: custom]` + `[VERSION: 0.1]` + `[END]` boundary, and SECTIONS per Samwise surface. Each section preserves its parent surface's marker conventions verbatim so a downstream parser (or human reader) can still extract the section as a valid script of its parent type.
+
   ```
-- **Explanation:** Mirrors `prefill-from-qualification.ts` exactly. Reset-before-fill (per session-copilot skill section 0).
+  # Samwise Custom Script — Manifest
+  [TYPE: custom]
+  [VERSION: 0.1]
 
-### Phase 4 — `lib/copilot/load-from-doc.ts` + `lib/copilot/prefill-from-doc-extraction.ts` (NEW)
+  ## Section 1 — Qualification prompts
+  (capture format + per-variable framework semantics, with [FRAMEWORK_*] placeholders)
 
-- **Code (sketch — load-from-doc.ts):**
-  ```ts
-  const EXTRACT_ONBOARDING_FROM_DOC_URL = "https://extractonboardingfromdoc-XXXX-uc.a.run.app";
+  ## Section 2 — Demo Call script
+  [TYPE: demo]
+  …Phase 1 → Phase 17 with [SAY]/[/SAY] markers, {{variables}} preserved,
+  [FRAMEWORK_*] placeholders where framework content goes…
+  [END section]
 
-  export interface DocExtractionPayload { extracted: Record<string, string>; sourceDocId: string; }
+  ## Section 3 — Onboarding script
+  [TYPE: onboarding]
+  …same shape…
+  [END section]
 
-  export async function extractOnboardingFromDoc(docLink: string): Promise<DocExtractionPayload | null> {
-    const res = await fetch(EXTRACT_ONBOARDING_FROM_DOC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ googleDocLink: docLink }),
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return res.json();
-  }
+  ## Section 4 — Behavioural-design "Possible Origins" tab spec
+  (replaces/extends what the behavioural-design flow captures)
+
+  ## Section 5 — Call Design (Ritual mantras / Protection / Activity)
+
+  ## Section 6 — Daily AI agent prompt (4-beat ritual: Exit / Entry / Intentions / Pact)
+
+  [END]
   ```
-- **`prefill-from-doc-extraction.ts`** — pure helper, mirrors `prefill-from-demo-call.ts` but takes the extraction payload shape.
 
-### Phase 5 — `app/copilot/onboarding-prefill-row.tsx` (NEW)
+- The framework-specific placeholders use a **structural-role-prefixed** name so the synthesizer prompt can reason about placement: `[ROLE_INITIAL_BELIEF_CAPTURE_FORMAT]`, `[ROLE_NARRATIVE_INTEGRATION_FORMAT]`, `[ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8]`, `[ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION]`, `[ROLE_TEACHING_OF_LOOP_AT_PHASE_6]`, `[ROLE_CLOSING_REFRAME_AT_PHASE_12]`, `[ROLE_DAILY_RITUAL_FRAMING]`, `[ROLE_METAPHOR_FOR_ENEMY]`. Same framework component MAY appear at multiple placeholders (CPT's Worksheets fill `[ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8]` AND `[ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION]` with the same source mechanism, formatted differently per slot).
+- The four canonical mandatory beats (Phase 1.5 reflection, Phase 5b 9-step, vocabulary-blacklist ☞ guidance, Phase 11 verdict) are preserved verbatim in the Demo section regardless of framework.
+- Template Doc id goes into `cloud-functions/.env` as `SAMWISE_TEMPLATE_DOC_ID`.
 
-- **Code (sketch):**
-  ```tsx
-  type Mode = "firestore" | "doc" | "manual";
+**Step B.4 — Create the parent Drive folder**
 
-  export function OnboardingPrefillRow({ script, state, setState, variables, cleanCallback }: Props) {
-    const [mode, setMode] = useState<Mode>("firestore");
-    const [identifier, setIdentifier] = useState("");      // email/phone/name
-    const [docLink, setDocLink] = useState("");
-    const [loading, setLoading] = useState(false);
+- User creates "Samwise Custom Scripts" folder in their Drive. Shares it Editor with the service account email. Id goes into `cloud-functions/.env` as `SAMWISE_CUSTOM_PARENT_FOLDER_ID`.
 
-    async function handleLoad() {
-      setLoading(true);
-      if (mode === "firestore") {
-        const demoCall = await loadDemoCall(identifier);
-        if (demoCall) prefillFromDemoCall({ demoCall, variables, setState, state, cleanCallback });
-        else toast.error("No demo call on file for this prospect");
-      } else if (mode === "doc") {
-        const payload = await extractOnboardingFromDoc(docLink);
-        if (payload) prefillFromDocExtraction({ payload, variables, setState, state, cleanCallback });
-        else toast.error("Could not extract from doc");
+### Phase C — The `synthesizeCustomScript` cloud function
+
+**Step C.1 — Add dependencies**
+
+- **In-file location:** `samwise-backend/cloud-functions/functions/package.json`, `dependencies` block.
+- **Should NOT be modified:** any existing dep version, `devDependencies`, scripts, engines.
+- **Add:**
+  ```json
+  "pdf-parse": "^1.1.1",
+  "@mozilla/readability": "^0.5.0",
+  "jsdom": "^24.0.0"
+  ```
+- **Explanation:** `pdf-parse` extracts text from uploaded PDFs (the therapist's framework material). `@mozilla/readability` + `jsdom` extract the main content from a fetched URL (strips ads/nav, leaves the framework body). Both are battle-tested, no native deps, fast cold-start friendly.
+
+**Step C.2 — Append `synthesizeCustomScript` to `index.ts`**
+
+- **In-file location:** `samwise-backend/cloud-functions/functions/src/index.ts` — APPEND at the end (after `extractTrackingKpis` at line ~3216). Keeps the diff a pure addition; existing functions untouched.
+- **Should NOT be modified:** every other `export const ___` in this file. No refactor, no shared-helper extraction. We mirror `createRitualDoc`'s style verbatim.
+- **Verify before pasting:** the exact symbol used by `cleanVariable` to get a Gemini client (around line 1693). The placeholder `getGeminiClient` below should be swapped for whatever's actually in `index.ts` (e.g. it may be a local `new GoogleGenerativeAI(API_KEY)` call inline; if so, repeat that inline rather than introducing a new helper).
+- **Code:**
+  ```ts
+  /**
+   * synthesizeCustomScript (HTTP)
+   *
+   * Therapist-facing entrypoint for "Build a custom samwise script."
+   * Takes a framework material payload (PDF base64, URL, or pasted text),
+   * reads the Samwise Adaptation Procedure Doc, copies the Samwise Custom
+   * Script Template Doc, and fills the copy by walking the procedure with
+   * Gemini.
+   *
+   * Mirrors createRitualDoc's drive.copy + docs.batchUpdate pattern.
+   *
+   * Required env vars:
+   *   SAMWISE_PROCEDURE_DOC_ID         — Adaptation Procedure Doc.
+   *                                      Must be shared with the SA as Reader.
+   *   SAMWISE_TEMPLATE_DOC_ID          — Custom Script Template Doc.
+   *                                      Must be shared with the SA as Reader.
+   *   SAMWISE_CUSTOM_PARENT_FOLDER_ID  — Drive folder for the copies.
+   *                                      Editor-shared to the SA. Operator owns.
+   *   GEMINI_KEY                       — already set for cleanVariable
+   *                                      (NB: env var name is GEMINI_KEY,
+   *                                      not GEMINI_API_KEY — verified
+   *                                      against existing call sites).
+   */
+  export const synthesizeCustomScript = onRequest(
+    {cors: true, timeoutSeconds: 540, memory: "1GiB"},
+    async (req, res) => {
+      if (req.method !== "POST") {
+        res.status(405).send({error: "Method Not Allowed"});
+        return;
       }
-      // mode === "manual" → no-op
-      setLoading(false);
+
+      interface SynthRequest {
+        inputMode: "pdf" | "url" | "text";
+        pdfBase64?: string;          // when inputMode = "pdf"
+        url?: string;                // when inputMode = "url"
+        text?: string;               // when inputMode = "text"
+        therapistName?: string;      // optional, for doc title
+        therapistEmail?: string;     // optional, share Doc as Editor
+        frameworkName?: string;      // optional, for doc title + procedure hint
+      }
+
+      try {
+        const body = req.body as SynthRequest;
+        const procedureDocId = process.env.SAMWISE_PROCEDURE_DOC_ID;
+        const templateDocId  = process.env.SAMWISE_TEMPLATE_DOC_ID;
+        const parentFolderId = process.env.SAMWISE_CUSTOM_PARENT_FOLDER_ID;
+        if (!procedureDocId || !templateDocId || !parentFolderId) {
+          logger.error("synthesizeCustomScript: missing env config");
+          res.status(500).send({error: "Server misconfigured"});
+          return;
+        }
+
+        // 1. Extract framework text from the chosen input mode.
+        let frameworkText = "";
+        if (body.inputMode === "pdf" && body.pdfBase64) {
+          const pdfParse = (await import("pdf-parse")).default;
+          const buffer = Buffer.from(body.pdfBase64, "base64");
+          const parsed = await pdfParse(buffer);
+          frameworkText = parsed.text;
+        } else if (body.inputMode === "url" && body.url) {
+          const html = await (await fetch(body.url)).text();
+          const {JSDOM} = await import("jsdom");
+          const {Readability} = await import("@mozilla/readability");
+          const dom = new JSDOM(html, {url: body.url});
+          const article = new Readability(dom.window.document).parse();
+          frameworkText = article?.textContent ?? html;
+        } else if (body.inputMode === "text" && body.text) {
+          frameworkText = body.text;
+        } else {
+          res.status(400).send({error: "Provide pdf, url, or text"});
+          return;
+        }
+        if (frameworkText.trim().length < 200) {
+          res.status(400).send({error: "Framework material too short"});
+          return;
+        }
+
+        // 2. Read the procedure Doc via Drive export (raw text — we
+        //    want the full prose, not a parsed-into-phases shape).
+        const drive = getDriveClient();
+        const procedureExport = await drive.files.export({
+          fileId: procedureDocId,
+          mimeType: "text/plain",
+        }, {responseType: "text"});
+        const procedureText = String(procedureExport.data);
+
+        // 3. Copy the template Doc into the parent folder.
+        const therapist = body.therapistName?.trim() || "Therapist";
+        const framework = body.frameworkName?.trim() || "Custom";
+        const docTitle =
+          `Samwise — ${therapist} — ${framework} — ` +
+          new Date().toISOString().slice(0, 10);
+        const copyResp = await drive.files.copy({
+          fileId: templateDocId,
+          requestBody: {name: docTitle, parents: [parentFolderId]},
+          supportsAllDrives: true,
+          fields: "id, webViewLink",
+        });
+        const documentId = copyResp.data.id;
+        const documentUrl = copyResp.data.webViewLink ??
+          `https://docs.google.com/document/d/${documentId}/edit`;
+        if (!documentId) {
+          logger.error("synthesizeCustomScript: copy returned no id");
+          res.status(500).send({error: "Failed to create doc"});
+          return;
+        }
+
+        // 4. Read the freshly-copied template's text so Gemini sees
+        //    the exact placeholders it needs to fill.
+        const tmplExport = await drive.files.export({
+          fileId: documentId,
+          mimeType: "text/plain",
+        }, {responseType: "text"});
+        const templateText = String(tmplExport.data);
+
+        // 5. Gemini fill pass. Single round-trip — model returns a
+        //    JSON map { placeholder: filledText }. We then
+        //    batchUpdate each [PLACEHOLDER] in the Doc. Inline
+        //    construction matches the pattern at cleanVariable
+        //    (index.ts line ~1716): `new GoogleGenerativeAI(
+        //    requireEnv("GEMINI_KEY"))` — no shared helper.
+        const gemini = new GoogleGenerativeAI(requireEnv("GEMINI_KEY"));
+        const model = gemini.getGenerativeModel({
+          model: "gemini-2.5-pro",
+          generationConfig: {
+            temperature: 0.4,
+            responseMimeType: "application/json",
+          },
+        });
+        const prompt = buildSynthesizeCustomScriptPrompt(
+          procedureText, templateText, frameworkText, framework
+        );
+        const result = await model.generateContent(prompt);
+        const raw = result.response.text();
+        const replacements = JSON.parse(raw) as Record<string, string>;
+
+        // 6. batchUpdate replaceAllText for each [PLACEHOLDER].
+        const docs = getDocsClient();
+        const requests = Object.entries(replacements).map(([key, value]) => ({
+          replaceAllText: {
+            containsText: {text: `[${key}]`, matchCase: true},
+            replaceText: value,
+          },
+        }));
+        if (requests.length > 0) {
+          await docs.documents.batchUpdate({
+            documentId,
+            requestBody: {requests},
+          });
+        }
+
+        // 7. (Optional) Share with therapist as Editor.
+        if (body.therapistEmail) {
+          await drive.permissions.create({
+            fileId: documentId,
+            requestBody: {role: "writer", type: "user",
+              emailAddress: body.therapistEmail.trim()},
+            sendNotificationEmail: true,
+          });
+        }
+
+        res.status(200).send({documentId, documentUrl});
+      } catch (error) {
+        logger.error("synthesizeCustomScript error:", error);
+        res.status(500).send({error: "Synthesis failed"});
+      }
+    }
+  );
+
+  function buildSynthesizeCustomScriptPrompt(
+    procedureText: string,
+    templateText: string,
+    frameworkText: string,
+    frameworkName: string,
+  ): string {
+    return `
+  You are adapting Samwise to a new therapeutic framework.
+
+  STEP-BY-STEP PROCEDURE (read first; this defines canon vs swappable):
+  ${procedureText}
+
+  TARGET FRAMEWORK (read second; this is what we are adapting TO):
+  Framework name: ${frameworkName}
+  Framework material (full text):
+  ${frameworkText}
+
+  TEMPLATE TO FILL (read third; every [PLACEHOLDER_LIKE_THIS] needs a value):
+  ${templateText}
+
+  TASK:
+  Produce a JSON object mapping every [PLACEHOLDER] in the template to its
+  filled value. Only fill PLACEHOLDERS in [SQUARE_BRACKETS]; do NOT touch
+  {{double_curly_braces}} — those are runtime variable slots, not synthesis
+  placeholders.
+
+  Placeholders are named [ROLE_<STRUCTURAL_ROLE>_AT_<SAMWISE_SLOT>]. A single
+  framework component MAY fill multiple placeholders (e.g. CPT Worksheets fill
+  both [ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8] and
+  [ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION] — same mechanism, different
+  formatting per slot). Per the procedure's §2 placement rubric, think across
+  the WHOLE funnel: a framework's components may land at different sections
+  (Qualification / Demo / Onboarding / Possible Origins / Daily ritual) — not
+  all of them belong at Phase 8.
+
+  HARD CONSTRAINTS (from procedure §5):
+  - Keep the 4-beat call structure intact.
+  - Keep every mandatory beat (Phase 1.5, Phase 5b 9-step, etc.).
+  - NEVER write "paciente", "comportamiento autodestructivo", "recaída", or
+    "terapia" into spoken text — use the framework's own vocabulary instead.
+  - Preserve every {{variable}} slot exactly as written.
+
+  Return ONLY a JSON object of the shape:
+    { "PLACEHOLDER_NAME": "filled text", ... }
+  No prose, no markdown, no preamble.
+  `.trim();
+  }
+  ```
+- **Explanation:** A single self-contained HTTP function that mirrors `createRitualDoc`'s lifecycle (copy → fill → return). Memory bumped to `1GiB` and timeout to `540s` because Gemini-2.5-pro on a long procedure + framework text can take 30–90s. Cold-start tradeoff is acceptable — this is a per-therapist one-shot, not a hot path.
+
+**Step C.3 — Add env vars**
+
+- **Where:** `samwise-backend/cloud-functions/.env` (NEVER committed) — or `firebase functions:secrets:set` depending on which storage cloud-functions currently uses for `RITUAL_TEMPLATE_DOC_ID` etc. **Verify which** before adding.
+- **Action:**
+  ```
+  SAMWISE_PROCEDURE_DOC_ID=<from Phase A.3>
+  SAMWISE_TEMPLATE_DOC_ID=<from Phase B.3>
+  SAMWISE_CUSTOM_PARENT_FOLDER_ID=<from Phase B.4>
+  ```
+
+**Step C.4 — Deploy**
+
+- **Command:** `cd samwise-backend/cloud-functions && firebase deploy --only functions:synthesizeCustomScript`
+- **Verify:** the deploy log shows the new function URL. Capture it for Step D.1's `SYNTH_URL` constant.
+
+### Phase D — `BuildCustomScriptCard` + sidebar wiring
+
+**Step D.1 — Create `components/build-custom-script-card.tsx`**
+
+- **In-file location:** new file `samwise-app/components/build-custom-script-card.tsx`.
+- **Should NOT be modified:** `components/register-ritual-card.tsx`. Read it for the shape; do NOT extract a shared helper — duplication is fine at v0.
+- **Code:**
+  ```tsx
+  "use client"
+
+  import { useState, useEffect } from "react"
+  import {
+    FieldGroup,
+    Field,
+    FieldLabel,
+    FieldDescription,
+  } from "@/components/ui/field"
+  import { Input } from "@/components/ui/input"
+  import { Textarea } from "@/components/ui/textarea"
+  import { Button } from "@/components/ui/button"
+  import { Spinner } from "@/components/ui/spinner"
+
+  const SYNTH_URL =
+    "https://synthesizecustomscript-b6fhjlgejq-uc.a.run.app"  // confirm after deploy
+  const LAST_DOC_KEY = "custom-script:last-doc"
+
+  type InputMode = "pdf" | "url" | "text"
+
+  export function BuildCustomScriptCard() {
+    const [mode, setMode] = useState<InputMode>("text")
+    const [text, setText] = useState("")
+    const [url, setUrl] = useState("")
+    const [pdfBase64, setPdfBase64] = useState<string | null>(null)
+    const [therapistName, setTherapistName] = useState("")
+    const [therapistEmail, setTherapistEmail] = useState("")
+    const [frameworkName, setFrameworkName] = useState("")
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const [resultUrl, setResultUrl] = useState<string | null>(null)
+    const [hydrateUrl, setHydrateUrl] = useState("")
+
+    useEffect(() => {
+      const cached = localStorage.getItem(LAST_DOC_KEY)
+      if (cached) setResultUrl(cached)
+    }, [])
+
+    async function handlePdfChange(e: React.ChangeEvent<HTMLInputElement>) {
+      const f = e.target.files?.[0]
+      if (!f) return
+      const buf = await f.arrayBuffer()
+      const b64 = btoa(
+        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), "")
+      )
+      setPdfBase64(b64)
+    }
+
+    async function handleSubmit() {
+      setLoading(true); setError(null)
+      try {
+        const body: Record<string, unknown> = {
+          inputMode: mode,
+          therapistName: therapistName || undefined,
+          therapistEmail: therapistEmail || undefined,
+          frameworkName: frameworkName || undefined,
+        }
+        if (mode === "pdf")  body.pdfBase64 = pdfBase64
+        if (mode === "url")  body.url = url
+        if (mode === "text") body.text = text
+        const r = await fetch(SYNTH_URL, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        })
+        if (!r.ok) throw new Error(`Synthesis failed: ${r.status}`)
+        const j = await r.json() as {documentUrl: string}
+        setResultUrl(j.documentUrl)
+        localStorage.setItem(LAST_DOC_KEY, j.documentUrl)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Unknown error")
+      } finally { setLoading(false) }
+    }
+
+    function handleHydrate() {
+      if (!hydrateUrl.trim()) return
+      localStorage.setItem(LAST_DOC_KEY, hydrateUrl.trim())
+      setResultUrl(hydrateUrl.trim())
     }
 
     return (
-      <div className="space-y-2 rounded-md border p-3">
-        <div className="text-sm font-medium">Pre-fill onboarding session</div>
-        <RadioGroup value={mode} onValueChange={setMode}>
-          <RadioGroupItem value="firestore" label="From Firestore (email)" />
-          <RadioGroupItem value="doc" label="From Google Doc URL" />
-          <RadioGroupItem value="manual" label="Manual" />
-        </RadioGroup>
-        {mode === "firestore" && <Input value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="prospect@email.com" />}
-        {mode === "doc" && <Input value={docLink} onChange={e => setDocLink(e.target.value)} placeholder="https://docs.google.com/document/d/..." />}
-        {mode !== "manual" && <Button onClick={handleLoad} disabled={loading}>Load</Button>}
+      <div className="max-w-2xl space-y-8">
+        <FieldGroup>
+          <Field>
+            <FieldLabel>Framework name (optional)</FieldLabel>
+            <Input value={frameworkName} onChange={e => setFrameworkName(e.target.value)} placeholder="CPT, ITAA 12-steps, …" />
+          </Field>
+          <Field>
+            <FieldLabel>Therapist name (optional)</FieldLabel>
+            <Input value={therapistName} onChange={e => setTherapistName(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Therapist email (optional — shares the Doc as Editor)</FieldLabel>
+            <Input type="email" value={therapistEmail} onChange={e => setTherapistEmail(e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Input mode</FieldLabel>
+            <div className="flex gap-3">
+              {(["text","url","pdf"] as InputMode[]).map(m => (
+                <label key={m} className="flex items-center gap-2 text-sm">
+                  <input type="radio" checked={mode===m} onChange={() => setMode(m)} />
+                  {m.toUpperCase()}
+                </label>
+              ))}
+            </div>
+          </Field>
+          {mode === "text" && (
+            <Field>
+              <FieldLabel>Paste your framework material</FieldLabel>
+              <Textarea rows={10} value={text} onChange={e => setText(e.target.value)} />
+            </Field>
+          )}
+          {mode === "url" && (
+            <Field>
+              <FieldLabel>URL of your framework material</FieldLabel>
+              <Input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" />
+            </Field>
+          )}
+          {mode === "pdf" && (
+            <Field>
+              <FieldLabel>Upload PDF</FieldLabel>
+              <Input type="file" accept="application/pdf" onChange={handlePdfChange} />
+            </Field>
+          )}
+          <Button onClick={handleSubmit} disabled={loading}>
+            {loading ? <Spinner /> : "Build custom samwise script"}
+          </Button>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </FieldGroup>
+
+        {resultUrl && (
+          <FieldGroup>
+            <Field>
+              <FieldLabel>Your custom samwise script Doc</FieldLabel>
+              <FieldDescription>
+                Click to open in Google Docs. Edit freely; the link is cached locally so you can return to it.
+              </FieldDescription>
+              <a href={resultUrl} target="_blank" rel="noreferrer" className="text-primary underline break-all">{resultUrl}</a>
+            </Field>
+          </FieldGroup>
+        )}
+
+        <FieldGroup>
+          <Field>
+            <FieldLabel>Continue from an existing Doc</FieldLabel>
+            <FieldDescription>
+              Paste the URL of a previously-generated custom samwise Doc to re-hydrate it here.
+            </FieldDescription>
+            <Input value={hydrateUrl} onChange={e => setHydrateUrl(e.target.value)} placeholder="https://docs.google.com/document/d/…" />
+            <Button variant="ghost" onClick={handleHydrate}>Load</Button>
+          </Field>
+        </FieldGroup>
       </div>
-    );
+    )
   }
   ```
-- **Explanation:** Three radio options. "manual" hides the input + button entirely. UI primitives reuse shadcn `RadioGroup`/`Input`/`Button` already present in the app.
+- **Explanation:** Self-contained, no props. Mirrors `RegisterRitualCard`'s shape: `FieldGroup` / `Field` / `Input` / `Button`, no `<Card>` wrapper. PDF upload reads to a base64 string client-side (cap PDF size to ~5 MB at the upload UI in a hardening pass; v0 trusts the user). Hydration is local-only — the Doc URL is treated as the artifact identifier, no Drive read needed at this surface. The "Load" button stores it to localStorage so the next mount sees it.
 
-### Phase 6 — `lib/copilot/save-onboarding.ts` + `save-to-doc.ts` + `copy-to-clipboard.ts` (NEW)
+**Step D.2 — Wire the sidebar item in `app/for-experts/page.tsx`**
 
-- **`save-onboarding.ts`** — POST to new `extractOnboarding` CF, body `{ raw, cleaned, prospectKey }`. Mirrors `append-row.ts`.
-- **`save-to-doc.ts`** — POST to new `writeOnboardingToDoc` CF, body `{ googleDocLink, cleaned, scriptPhases }`.
-- **`copy-to-clipboard.ts`** — pure client:
-  ```ts
-  export function copyOnboardingNotes(args: { cleaned: Record<string, string>; variables: DemoCallVariable[]; }) {
-    const md = renderAsMarkdown(args.cleaned, args.variables); // group by phase, "- {name}: {value}"
-    return navigator.clipboard.writeText(md);
-  }
-  ```
-
-### Phase 7 — `app/copilot/onboarding-save-row.tsx` (NEW)
-
-- **Code (sketch):** three checkboxes (Firestore | Doc URL | Clipboard), optional Doc URL input if the Doc checkbox is checked, one "Save" button that fires all selected destinations in parallel and toasts per-destination success.
-- **Explanation:** Checkbox semantics (not radio) — the clinician can save to all three at once.
-
-### Phase 8 — `app/copilot/page.tsx` edits
-
-- **In-file location:** `app/copilot/page.tsx`.
-- **Should not be modified:** The qualification-load path. The localStorage restore. The scroll sync.
+- **In-file location:** `samwise-app/app/for-experts/page.tsx`, FOUR coupled edits:
+- **Should NOT be modified:** the entire copilot path (URL gate, `copilotLoaded` derivation, `<CopilotSurface>` mount, all qualify / onboarding wiring), the Register Ritual path, the layout shell, the brand header. Only the four edits below land.
 - **Edits:**
-  1. Remove the `scriptType !== "demo"` rejection block.
-  2. Compute `const variables = loaded.scriptType === "onboarding" ? ONBOARDING_VARIABLES : DEMO_CALL_VARIABLES;` once after script load.
-  3. Branch the top-of-pane render:
-     ```tsx
-     {loaded.scriptType === "demo"
-       ? <QualifyPrefillRow script={loaded} state={state} setState={setState} />
-       : <OnboardingPrefillRow script={loaded} state={state} setState={setState} variables={variables} cleanCallback={cleanCallback} />}
-     ```
-  4. Branch the save button at the bottom:
-     ```tsx
-     {loaded.scriptType === "demo"
-       ? <DemoSaveButton ... />
-       : <OnboardingSaveRow cleaned={state.cleaned} raw={state.raw} variables={variables} />}
-     ```
-  5. Thread `variables` into `<CopilotSurface>` (or `<VariablesTable>` directly if that's the prop site).
+  ```tsx
+  // (1) Top of file, alongside the other component imports:
+  import { BuildCustomScriptCard } from "@/components/build-custom-script-card"
 
-### Phase 9 — `lib/copilot/session-storage.ts` edits
+  // (2) Replace the ExpertView union at line 60:
+  type ExpertView = "copilot" | "register" | "build-custom"
 
-- Bump v4 → v5.
-- Key is now `copilot:session:v5:${scriptType}` so demo + onboarding sessions persist independently.
-- Mount-restore reads the key matching the just-loaded `scriptType`.
+  // (3) Inside the <SidebarMenu>, after the "Register Ritual"
+  //     SidebarMenuItem (after line ~183):
+  <SidebarMenuItem>
+    <SidebarMenuButton
+      isActive={view === "build-custom"}
+      onClick={() => setView("build-custom")}
+      tooltip="Build custom samwise script"
+    >
+      <span>Build custom samwise</span>
+    </SidebarMenuButton>
+  </SidebarMenuItem>
 
-### Testing phase
+  // (4) In the render block, after the line
+  //     `{view === "register" && <RegisterRitualCard />}` (line ~273):
+  {view === "build-custom" && <BuildCustomScriptCard />}
 
-- **Local test (manual, no e2e):**
-  1. `npm run dev` in samwise-app.
-  2. Open /copilot, paste the onboarding Doc URL, click load.
-  3. Verify: scriptType returns `"onboarding"`, phases render, `[CONDITION: grado_de_identificacion=high]` block in Phase 9 toggles correctly when the variable is set.
-  4. Prefill mode A: enter a real prospect's email → variables panel hydrates from demoCall. Spot-check 3 fields.
-  5. Prefill mode B: paste a Google Doc URL with onboarding-relevant notes → variables hydrate from LLM extraction. Spot-check.
-  6. Prefill mode C: refresh page, choose "Manual" → no auto-fill, panel stays empty.
-  7. Save mode A: click Save with Firestore checked → `onboardingSessions/${prospectKey}-${ts}` written. Verify via Firebase console.
-  8. Save mode B: paste a Doc URL → append notes to that doc. Verify in Drive.
-  9. Save mode C: click Save with Clipboard checked → paste into a text editor, verify markdown.
-- **Integration test:** N/A — exercised via the local test against deployed CFs.
-- **Update README:** N/A.
+  // (5) In the header h1 label resolver (around line ~199, currently a
+  //     ternary like `view === "copilot" ? "Copilot for behavioural experts" : "Register Ritual"`),
+  //     extend to:
+  //       view === "copilot"  ? "Copilot for behavioural experts"
+  //     : view === "register" ? "Register Ritual"
+  //     : "Build custom samwise"
+  ```
+- **Explanation:** Pure additions in the existing view-state machine. No URL change, no route added. The new view is one click away from Copilot — when the therapist has built their script, they switch back to Copilot, paste the new Doc URL into the existing gate, and the existing `loadCallScript` flow handles it.
 
-### After implementation
+**Step D.3 (optional, can ship in a follow-up) — "Load into Copilot" affordance**
 
-- Update `samwise-app/context-for-code-agent.md` "Module Structure" section to list the new files.
-- Update `samwise-session-copilot` skill (in `Documents/samwise/.claude/skills/`) — section 8 "Demo Call only in v1" → flip to "Demo + Onboarding"; add the new prefill/save pattern.
-- Mark task DONE in master Vibe doc Projects tab (manual user step).
+- Add a `<Button onClick={() => { /* setView('copilot'); seed URL gate */ }}>Load into Copilot</Button>` inside the `resultUrl` `FieldGroup`. Requires lifting `setView` + a one-shot URL seed prop into `BuildCustomScriptCard` (or via a tiny context). **Skip in v0** — paste-into-gate works fine.
+
+### Phase E — Voice-refine flow (DEFERRED — outline only)
+
+A new sibling flow `flows/custom-script-design/` in `samwise-backend/ritual-agent/`, mirroring `flows/ritual-design/`. The therapist talks to the agent, the agent reads the just-generated custom script Doc, and the therapist refines specific phases conversationally. Same Aragorn persona, same `readGoogleDoc` / `writeToDocTab` infra (per the `ritual-design-prompt` skill). Surface in samwise-app: a "Refine via voice" button on `BuildCustomScriptCard` once `resultUrl` is set.
+
+**Not in scope for this task.** Documented here so the architecture stays consistent.
+
+### Phase F — Quick fit test + first-class `[TYPE: custom]` config (DEFERRED — outline only)
+
+A `/for-experts/custom-script-test` sub-view (or a fourth sidebar item) that loads the therapist's custom script into a sandbox copilot with a simulated patient (LLM plays the patient end-to-end) so the therapist can feel the call without recruiting. ALSO: add `custom` to the `configForScriptType()` router in `app/for-experts/page.tsx` so `[TYPE: custom]` scripts get their own variable config + UI instead of falling through to demo.
+
+**Not in scope for this task.**
+
+## Testing phase
+
+### Local test
+
+- **Phase A:** Doc is reviewable in Google Docs. No code to run.
+- **Phase B:** Worked example Doc + template Doc are reviewable. No code to run.
+- **Phase C:**
+  - `cd samwise-backend/cloud-functions/functions && pnpm tsc --noEmit` — type-check.
+  - `pnpm lint` — lint clean.
+  - `firebase emulators:start --only functions` — start emulator.
+  - Hit the local emulator URL with `curl` (text mode, short payload) — verify it returns `{ documentId, documentUrl }` and that the resulting Doc has every `[PLACEHOLDER]` substituted (open in Google Docs, Ctrl+F for `[` — should find only `[SAY]`/`[/SAY]`/`[END]`/`[TYPE: ...]`/`[VERSION: ...]` markers).
+- **Phase D:**
+  - `cd samwise-app && pnpm dev` — start dev server.
+  - Open `http://localhost:3000/for-experts` → sidebar "Build custom samwise" → fill text mode with ~500 words of CPT material → Submit → verify Doc URL appears.
+  - Hard-reload → URL is still visible (localStorage hydration works).
+  - Paste a different Doc URL into "Continue from existing Doc" → click Load → verify `resultUrl` swaps.
+
+### Integration test
+
+- Deploy `synthesizeCustomScript` to the production Firebase project.
+- Update `SYNTH_URL` in `build-custom-script-card.tsx` to the deployed URL.
+- From localhost samwise-app, submit a real PDF (e.g. an ITAA 12-step pamphlet) → verify the resulting Doc renders in Google Docs with: the framework's vocabulary present in spoken text, Samwise canon vocabulary preserved, vocabulary blacklist respected (Ctrl+F for `paciente` / `recaída` / `comportamiento autodestructivo` / `terapia` inside `[SAY]…[/SAY]` blocks — must return 0 hits).
+- Switch back to "Copilot" view → paste the new Doc URL into the gate → `loadCallScript` returns the parsed shape → renders in script-pane without errors. (Variable substitution may be sparse since the custom script's `{{variables}}` may not be in `demo-call-config.ts` — acceptable for v0.)
+
+### Update README
+
+- **samwise-backend/cloud-functions/functions/src/index.ts:** add `synthesizeCustomScript` to the top-of-file function index comment (line ~53).
+- **samwise-app:** no README update (the app doesn't have a feature-list README).
+
+## After implementation
+
+- Update `samwise-app/context-for-code-agent.md`:
+  - Add `/for-experts` "Build custom samwise" view to the route description.
+  - Note the new `BuildCustomScriptCard` component.
+  - Note the new cloud function `synthesizeCustomScript` and its three env vars.
+  - Note the localStorage key `custom-script:last-doc`.
+- Update `samwise-backend/cloud-functions/functions/src/index.ts`'s top-of-file comment to include `synthesizeCustomScript` in the function list.
+- (Manual user step) Mark the task DONE → FINISHED in the master Vibe doc Projects tab once Phases A–D ship. Phases E–F either remain IN PROGRESS as separate task entries or get spun off as new tasks.
+- (Skill update) Append a section to the `samwise-session-copilot` skill describing the "Build custom samwise" view and the `[TYPE: custom]` script-type fall-through behaviour. Add a new skill (or section in `samwise-script-work`) describing the **Samwise Adaptation Procedure Doc** as the source of truth for "what is canon."
