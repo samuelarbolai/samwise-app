@@ -93,44 +93,54 @@ export default function ForExpertsPage() {
     | null
   >(null)
 
-  // Restore last session on mount if one exists in localStorage.
-  // Also handles the "Load in Copilot to test" handoff from the
-  // Build custom samwise editor: if copilot:pending-script-id is set,
-  // fetch and mount that custom script as the active session.
+  // On mount, ONLY handle the "Load in Copilot to test" handoff from
+  // the Build custom samwise editor. We deliberately do NOT auto-restore
+  // the cached session here — that was causing the Copilot view to jump
+  // straight into a previously-loaded script and hide the URL gate (where
+  // the email-lookup for custom scripts lives). If the user wants to pick
+  // up a previous session, the URL gate now offers a "Resume last
+  // session" affordance when localStorage has one.
   useEffect(() => {
     const pendingScriptId = localStorage.getItem("copilot:pending-script-id")
-    if (pendingScriptId) {
-      localStorage.removeItem("copilot:pending-script-id")
-      setView("copilot")
-      setIsLoading(true)
-      loadCustomScript(pendingScriptId)
-        .then((loaded) => {
-          const cfg = configForScriptType(loaded.scriptType)
-          if (!cfg) {
-            toast.error(`Unsupported scriptType: ${loaded.scriptType}`)
-            return
-          }
-          setScript(loaded)
-          setState(makeEmptyState(cfg.variables))
-          toast.success("Custom script loaded", {
-            description: `${loaded.phases.length} phases · scriptType=${loaded.scriptType}.`,
-          })
+    if (!pendingScriptId) return
+    localStorage.removeItem("copilot:pending-script-id")
+    setView("copilot")
+    setIsLoading(true)
+    loadCustomScript(pendingScriptId)
+      .then((loaded) => {
+        const cfg = configForScriptType(loaded.scriptType)
+        if (!cfg) {
+          toast.error(`Unsupported scriptType: ${loaded.scriptType}`)
+          return
+        }
+        setScript(loaded)
+        setState(makeEmptyState(cfg.variables))
+        toast.success("Custom script loaded", {
+          description: `${loaded.phases.length} phases · scriptType=${loaded.scriptType}.`,
         })
-        .catch((err) => {
-          toast.error("Could not load custom script", {
-            description: err instanceof Error ? err.message : "Unknown error.",
-          })
+      })
+      .catch((err) => {
+        toast.error("Could not load custom script", {
+          description: err instanceof Error ? err.message : "Unknown error.",
         })
-        .finally(() => setIsLoading(false))
-      return
-    }
-    const restored = loadSessionState()
-    if (restored) {
-      setScript(restored.script)
-      setState(restored.state)
-      setDocUrl(restored.docUrl)
-    }
+      })
+      .finally(() => setIsLoading(false))
   }, [])
+
+  // Detect cached session for the "Resume" affordance on the URL gate.
+  const [hasCachedSession, setHasCachedSession] = useState(false)
+  useEffect(() => {
+    const restored = loadSessionState()
+    if (restored) setHasCachedSession(true)
+  }, [])
+
+  function handleResumeCachedSession() {
+    const restored = loadSessionState()
+    if (!restored) return
+    setScript(restored.script)
+    setState(restored.state)
+    setDocUrl(restored.docUrl)
+  }
 
   const handleCustomLookup = async () => {
     const email = customLookupEmail.trim()
@@ -340,6 +350,20 @@ export default function ForExpertsPage() {
 
           {view === "copilot" && !copilotLoaded && (
             <div className="w-full max-w-lg">
+              {hasCachedSession && (
+                <div className="mb-6 flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">
+                    Previous session in this browser
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleResumeCachedSession}
+                  >
+                    Resume
+                  </Button>
+                </div>
+              )}
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="doc-url">
