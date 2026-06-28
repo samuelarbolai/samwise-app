@@ -35,7 +35,11 @@ import {
   DEFAULT_ONBOARDING_SCRIPT_DOC_URL,
   ONBOARDING_VARIABLES,
 } from "./onboarding-call-config"
-import { loadCallScript, type LoadedScript } from "@/lib/copilot/load-script"
+import {
+  loadCallScript,
+  loadCustomScript,
+  type LoadedScript,
+} from "@/lib/copilot/load-script"
 import {
   loadSessionState,
   type SessionState,
@@ -55,6 +59,13 @@ function configForScriptType(
   if (scriptType === "demo") return { variables: DEMO_CALL_VARIABLES, mode: "demo" }
   if (scriptType === "onboarding")
     return { variables: ONBOARDING_VARIABLES, mode: "onboarding" }
+  // Therapist-built custom scripts (post-2026-06-28 Firestore path).
+  // v1 reuses the demo variable set so the script + variables panes
+  // render — the therapist is reading the script, not running a real
+  // call, so {{variable}} slots show as "Not filled by user" and the
+  // [SAY] blocks are visible for review.
+  if (scriptType === "custom")
+    return { variables: DEMO_CALL_VARIABLES, mode: "demo" }
   return null
 }
 
@@ -68,7 +79,36 @@ export default function ForExpertsPage() {
   const [state, setState] = useState<SessionState | null>(null)
 
   // Restore last session on mount if one exists in localStorage.
+  // Also handles the "Load in Copilot to test" handoff from the
+  // Build custom samwise editor: if copilot:pending-script-id is set,
+  // fetch and mount that custom script as the active session.
   useEffect(() => {
+    const pendingScriptId = localStorage.getItem("copilot:pending-script-id")
+    if (pendingScriptId) {
+      localStorage.removeItem("copilot:pending-script-id")
+      setView("copilot")
+      setIsLoading(true)
+      loadCustomScript(pendingScriptId)
+        .then((loaded) => {
+          const cfg = configForScriptType(loaded.scriptType)
+          if (!cfg) {
+            toast.error(`Unsupported scriptType: ${loaded.scriptType}`)
+            return
+          }
+          setScript(loaded)
+          setState(makeEmptyState(cfg.variables))
+          toast.success("Custom script loaded", {
+            description: `${loaded.phases.length} phases · scriptType=${loaded.scriptType}.`,
+          })
+        })
+        .catch((err) => {
+          toast.error("Could not load custom script", {
+            description: err instanceof Error ? err.message : "Unknown error.",
+          })
+        })
+        .finally(() => setIsLoading(false))
+      return
+    }
     const restored = loadSessionState()
     if (restored) {
       setScript(restored.script)

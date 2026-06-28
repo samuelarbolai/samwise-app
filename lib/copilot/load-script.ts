@@ -15,7 +15,7 @@ export interface LoadedPhase {
 }
 
 export interface LoadedScript {
-  scriptType: "demo" | "onboarding" | "call_design" | "unknown"
+  scriptType: "demo" | "onboarding" | "call_design" | "custom" | "unknown"
   version?: string
   phases: LoadedPhase[]
 }
@@ -44,12 +44,25 @@ interface RawLoadedScript {
 export async function loadCallScript(
   googleDocLink: string,
 ): Promise<LoadedScript> {
-  // NEVER cache the script — it must always reflect the live Google Doc.
-  // We defeat every HTTP-cache layer at once: `cache: "no-store"` bypasses
-  // the browser cache, a unique cache-busting query param defeats any
-  // URL-keyed proxy/CDN cache, and the no-cache request headers ask any
-  // intermediary to revalidate. The cloud function reads `req.body`, so
-  // the extra query param is ignored server-side.
+  return loadCallScriptFromBody({ googleDocLink })
+}
+
+/**
+ * Load a therapist-built custom script from Firestore via the same
+ * loadCallScript cloud function (extended 2026-06-28 to accept
+ * customScriptId as an alternative to googleDocLink).
+ */
+export async function loadCustomScript(
+  customScriptId: string,
+): Promise<LoadedScript> {
+  return loadCallScriptFromBody({ customScriptId })
+}
+
+async function loadCallScriptFromBody(
+  body: { googleDocLink: string } | { customScriptId: string },
+): Promise<LoadedScript> {
+  // NEVER cache the script — it must always reflect the live source
+  // (Doc or Firestore). Defeat every HTTP-cache layer at once.
   const bustUrl = `${LOAD_CALL_SCRIPT_URL}?_cb=${Date.now()}-${Math.round(
     Math.random() * 1e9,
   )}`
@@ -61,7 +74,7 @@ export async function loadCallScript(
       "Cache-Control": "no-cache",
       Pragma: "no-cache",
     },
-    body: JSON.stringify({ googleDocLink }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
