@@ -106,6 +106,19 @@ A framework adaptation **MUST** produce all four ritual components with their in
 
 If the framework's typical clinical material doesn't surface enough for one component (e.g. it has no anchor-surfacing move and the Hope Mantra is left thin), the synthesizer must EXTEND the inferred arrival path (§2) with a brief beat that surfaces the missing input — rather than producing an under-specified Ritual component.
 
+#### Per-component composition agency — what the synthesizer can pre-fill vs. what ships as a live-customized template
+
+Not every component can be fully composed by the synthesizer. The split:
+
+| Component | Synthesizer can pre-fill | Ships as live-customized template |
+|---|---|---|
+| 1. Desidentification Mantra | Yes — uses `{{behaviour_to_change}}` + `{{enemy_name}}` from arrival path | The framework-specific phrasing is the synthesizer's; the variable values come from arrival-path captures. |
+| 2. Hope Mantra | Yes — uses `{{symbolic_anchor_description}}` from arrival path | Verb choice depends on the anchor's idiom — *prayer* for religious / *commitment* for philosophical / *discipline* for scientific / *pledge* for ancestral. Synthesizer picks based on the anchor's tradition; the user can rephrase. |
+| 3. Immediate Protection | **Structure only** — the table shape, the &le;60s constraint, the &ldquo;remove the enabler&rdquo; rule | YES — each enabler-action row is filled live with the clinician + user in the Ritual hand-off session. Synthesizer ships rows with `[CLINICIAN: customize per enabler]` markers. |
+| 4. Gradual New Belief | **Structure only** — the daily-practice format, the tolerance-window calibration, the evidence-producing requirement | YES — the first week's specific practices are co-designed live in the Ritual hand-off session. Synthesizer ships with `[CLINICIAN: co-design first week]` markers and an example. |
+
+The synthesizer should NEVER fabricate Component 3 enabler-actions or Component 4 practices that the framework material can't justify — leave the cells marked for live fill rather than inventing specifics the clinician will have to discard.
+
 ### 1.3 The Daily AI Call — how the Ritual is reinforced (canon)
 
 The Ritual is reinforced through a daily call from the Samwise AI agent, structured in four beats:
@@ -213,6 +226,13 @@ f. Any vocabulary the framework uses that would violate §1.5 (paciente / recaí
 a. Uses the framework's own vocabulary, metaphor, register, and signature exercises (Step 1a–e).
 b. Surfaces each of the Ritual inputs listed in §2's table (`behaviour_to_change`, `enemy_name`, `symbolic_anchor_description`, `enablers_list`, `helpers_list`, `triggers_list`, `new_belief_target`) by the time the user reaches the Ritual.
 c. Reads naturally to a therapist working in this framework — they should recognize their own practice in the arrival path, not feel like Samwise has been imposed on top of it.
+d. **Tags each session/exercise with an authoring-agency marker** so downstream tooling knows who writes what:
+   - `[AUTHOR: clinician]` — clinician-driven session (e.g. CPT Session 1 psychoeducation, IFS Self-energy invocation).
+   - `[AUTHOR: patient]` — patient writes / dictates verbatim; agent or clinician only prompts and captures (e.g. CPT Trauma Account, IFS parts dialogue).
+   - `[AUTHOR: co-authored]` — clinician and patient produce together (e.g. CPT Challenging Beliefs Worksheet, Ritual hand-off).
+   - `[AUTHOR: agent]` — Samwise's daily AI agent or behavioural-design agent produces verbatim (default for the Daily AI Call beats).
+
+This matters because Samwise's existing tooling has different paths for each: `writeToDocTab` is agent-authored; behavioural-design's "Possible Origins" tab currently has no patient-authored variant. When the inferred arrival path requires patient-authored content (CPT Trauma Account being the canonical case), the synthesizer must surface this so the infra gap is visible.
 
 Do NOT ask the therapist what their arrival path should be. Propose. They edit if they want.
 

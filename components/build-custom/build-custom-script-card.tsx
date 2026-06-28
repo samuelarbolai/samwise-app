@@ -12,18 +12,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 
-// Phase C: paste the deployed synthesizeCustomScript function URL here.
-// Until then, submit is disabled (no synthesis happens client-side).
-const SYNTH_URL = ""
+// Phase C: configure via NEXT_PUBLIC_SAMWISE_SYNTH_URL in samwise-app/.env.local
+// (local dev) or in the Vercel project env (prod). When unset, the submit
+// button shows a "synthesizer not configured" error and bails out.
+const SYNTH_URL = process.env.NEXT_PUBLIC_SAMWISE_SYNTH_URL ?? ""
 const LAST_DOC_KEY = "custom-script:last-doc"
 
-type InputMode = "text" | "url" | "pdf"
-
 export function BuildCustomScriptCard() {
-  const [mode, setMode] = useState<InputMode>("text")
   const [text, setText] = useState("")
   const [url, setUrl] = useState("")
   const [pdfBase64, setPdfBase64] = useState<string | null>(null)
+  const [pdfName, setPdfName] = useState<string | null>(null)
   const [frameworkName, setFrameworkName] = useState("")
   const [therapistName, setTherapistName] = useState("")
   const [therapistEmail, setTherapistEmail] = useState("")
@@ -39,12 +38,17 @@ export function BuildCustomScriptCard() {
 
   async function handlePdfChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
-    if (!f) return
+    if (!f) {
+      setPdfBase64(null)
+      setPdfName(null)
+      return
+    }
     const buf = await f.arrayBuffer()
     const b64 = btoa(
       new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), "")
     )
     setPdfBase64(b64)
+    setPdfName(f.name)
   }
 
   async function handleSubmit() {
@@ -58,14 +62,13 @@ export function BuildCustomScriptCard() {
     setError(null)
     try {
       const body: Record<string, unknown> = {
-        inputMode: mode,
         therapistName: therapistName || undefined,
         therapistEmail: therapistEmail || undefined,
         frameworkName: frameworkName || undefined,
       }
-      if (mode === "pdf") body.pdfBase64 = pdfBase64
-      if (mode === "url") body.url = url
-      if (mode === "text") body.text = text
+      if (text.trim()) body.text = text.trim()
+      if (url.trim()) body.url = url.trim()
+      if (pdfBase64) body.pdfBase64 = pdfBase64
       const r = await fetch(SYNTH_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,11 +105,10 @@ export function BuildCustomScriptCard() {
     window.location.href = "/for-experts"
   }
 
+  // At least one source provided. The cloud function enforces a combined
+  // ≥200-char floor after concatenation; we only gate on "anything at all".
   const canSubmit =
-    !loading &&
-    ((mode === "text" && text.trim().length > 200) ||
-      (mode === "url" && url.trim().length > 0) ||
-      (mode === "pdf" && pdfBase64))
+    !loading && (text.trim().length > 0 || url.trim().length > 0 || !!pdfBase64)
 
   return (
     <div className="w-full max-w-2xl mx-auto p-6 py-12 space-y-10">
@@ -250,76 +252,57 @@ export function BuildCustomScriptCard() {
           />
         </Field>
 
+        <div className="text-sm text-muted-foreground -mb-3">
+          Framework material — provide any combination of the three. We
+          concatenate whatever you give us. The more substantive the total,
+          the better the synthesis (aim for ~500+ words combined).
+        </div>
+
         <Field>
-          <FieldLabel>Input mode</FieldLabel>
-          <div className="flex gap-4 pt-1">
-            {(["text", "url", "pdf"] as InputMode[]).map((m) => (
-              <label
-                key={m}
-                className="flex items-center gap-2 text-sm cursor-pointer"
-              >
-                <input
-                  type="radio"
-                  name="input-mode"
-                  checked={mode === m}
-                  onChange={() => setMode(m)}
-                />
-                {m.toUpperCase()}
-              </label>
-            ))}
-          </div>
+          <FieldLabel>Paste framework material</FieldLabel>
+          <FieldDescription>
+            Free-form text — manual excerpts, notes, your own description of
+            the framework.
+          </FieldDescription>
+          <Textarea
+            rows={8}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Paste the canonical text of the therapist&rsquo;s framework here…"
+          />
         </Field>
 
-        {mode === "text" && (
-          <Field>
-            <FieldLabel>Paste framework material</FieldLabel>
-            <FieldDescription>
-              The more substantive the material, the better the synthesis.
-              Aim for ~500+ words.
-            </FieldDescription>
-            <Textarea
-              rows={10}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Paste the canonical text of the therapist&rsquo;s framework here…"
-            />
-          </Field>
-        )}
+        <Field>
+          <FieldLabel>URL of framework material</FieldLabel>
+          <FieldDescription>
+            A public URL to the framework&rsquo;s canonical description
+            (manual chapter, APA page, framework site). We fetch + extract
+            the main content.
+          </FieldDescription>
+          <Input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+          />
+        </Field>
 
-        {mode === "url" && (
-          <Field>
-            <FieldLabel>URL of framework material</FieldLabel>
-            <FieldDescription>
-              A public URL to the framework&rsquo;s canonical description
-              (manual chapter, APA page, framework site).
-            </FieldDescription>
-            <Input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://…"
-            />
-          </Field>
-        )}
-
-        {mode === "pdf" && (
-          <Field>
-            <FieldLabel>Upload PDF</FieldLabel>
-            <FieldDescription>
-              The framework&rsquo;s manual or chapter as a PDF.
-            </FieldDescription>
-            <Input
-              type="file"
-              accept="application/pdf"
-              onChange={handlePdfChange}
-            />
-            {pdfBase64 && (
-              <p className="text-xs text-muted-foreground mt-1">
-                PDF loaded ({Math.round(pdfBase64.length / 1024)} KB)
-              </p>
-            )}
-          </Field>
-        )}
+        <Field>
+          <FieldLabel>Upload PDF</FieldLabel>
+          <FieldDescription>
+            The framework&rsquo;s manual or chapter as a PDF.
+          </FieldDescription>
+          <Input
+            type="file"
+            accept="application/pdf"
+            onChange={handlePdfChange}
+          />
+          {pdfBase64 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {pdfName} loaded ({Math.round(pdfBase64.length / 1024)} KB)
+            </p>
+          )}
+        </Field>
 
         <Button onClick={handleSubmit} disabled={!canSubmit}>
           {loading ? (
