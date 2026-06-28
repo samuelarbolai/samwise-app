@@ -30,6 +30,9 @@ export function BuildCustomScriptCard() {
   const [error, setError] = useState<string | null>(null)
   const [resultUrl, setResultUrl] = useState<string | null>(null)
   const [hydrateUrl, setHydrateUrl] = useState("")
+  const [scriptId, setScriptId] = useState<string | null>(null)
+  const [therapistId, setTherapistId] = useState<string | null>(null)
+  const [scriptContent, setScriptContent] = useState<string | null>(null)
 
   useEffect(() => {
     const cached = localStorage.getItem(LAST_DOC_KEY)
@@ -63,7 +66,7 @@ export function BuildCustomScriptCard() {
     try {
       const body: Record<string, unknown> = {
         therapistName: therapistName || undefined,
-        therapistEmail: therapistEmail || undefined,
+        therapistEmail: therapistEmail.trim(),
         frameworkName: frameworkName || undefined,
       }
       if (text.trim()) body.text = text.trim()
@@ -74,10 +77,21 @@ export function BuildCustomScriptCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-      if (!r.ok) throw new Error(`Synthesis failed: ${r.status}`)
-      const j = (await r.json()) as { documentUrl: string }
-      setResultUrl(j.documentUrl)
-      localStorage.setItem(LAST_DOC_KEY, j.documentUrl)
+      if (!r.ok) {
+        const errJson = await r.json().catch(() => ({}))
+        throw new Error(
+          errJson.error || `Synthesis failed: ${r.status}`
+        )
+      }
+      const j = (await r.json()) as {
+        therapistId: string
+        scriptId: string
+        content: string
+      }
+      setTherapistId(j.therapistId)
+      setScriptId(j.scriptId)
+      setScriptContent(j.content)
+      localStorage.setItem(LAST_DOC_KEY, j.scriptId)
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error")
     } finally {
@@ -95,20 +109,19 @@ export function BuildCustomScriptCard() {
   function handleClearResult() {
     localStorage.removeItem(LAST_DOC_KEY)
     setResultUrl(null)
+    setScriptId(null)
+    setTherapistId(null)
+    setScriptContent(null)
   }
 
-  function handleLoadInCopilot() {
-    if (!resultUrl) return
-    // Paste the Doc URL into the copilot URL gate via a localStorage handoff
-    // (the copilot reads this on switch). Simpler than lifting setView.
-    localStorage.setItem("copilot:pending-load-url", resultUrl)
-    window.location.href = "/for-experts"
-  }
-
-  // At least one source provided. The cloud function enforces a combined
-  // ≥200-char floor after concatenation; we only gate on "anything at all".
+  // therapistEmail required (keys the therapists/{therapistId} Firestore
+  // doc) + at least one framework-material source. The cloud function
+  // enforces a combined ≥200-char floor; we only gate on "anything at all"
+  // here so the error surfaces from the server with the real reason.
   const canSubmit =
-    !loading && (text.trim().length > 0 || url.trim().length > 0 || !!pdfBase64)
+    !loading &&
+    therapistEmail.trim().length > 0 &&
+    (text.trim().length > 0 || url.trim().length > 0 || !!pdfBase64)
 
   return (
     <div className="w-full max-w-2xl mx-auto p-6 py-12 space-y-10">
@@ -239,16 +252,17 @@ export function BuildCustomScriptCard() {
         </Field>
 
         <Field>
-          <FieldLabel>Therapist email</FieldLabel>
+          <FieldLabel>Therapist email (required)</FieldLabel>
           <FieldDescription>
-            Optional. If provided, the generated Doc is Editor-shared with
-            this email so the therapist can edit directly.
+            Required. Keys the therapist&rsquo;s record in our system so
+            they can return to edit this script later.
           </FieldDescription>
           <Input
             type="email"
             value={therapistEmail}
             onChange={(e) => setTherapistEmail(e.target.value)}
             placeholder="therapist@example.com"
+            required
           />
         </Field>
 
@@ -325,37 +339,21 @@ export function BuildCustomScriptCard() {
         )}
       </FieldGroup>
 
-      {resultUrl && (
-        <section className="border-t pt-8">
-          <h3 className="text-base font-medium mb-2">
+      {scriptId && scriptContent && (
+        <section className="border-t pt-8 space-y-3">
+          <h3 className="text-base font-medium">
             Your custom Samwise script
           </h3>
-          <p className="text-sm text-muted-foreground mb-3">
-            The Doc URL is cached locally, so this stays here on refresh. Open
-            it in Google Docs to edit, or load it into the Copilot to walk
-            through a call with it.
+          <p className="text-sm text-muted-foreground">
+            Synthesized and stored. Editor coming in the next change — for
+            now, the raw content is below. Therapist id:{" "}
+            <code className="text-xs">{therapistId}</code>. Script id:{" "}
+            <code className="text-xs">{scriptId}</code>.
           </p>
-          <a
-            href={resultUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline text-sm break-all block mb-4"
-          >
-            {resultUrl}
-          </a>
+          <pre className="text-xs whitespace-pre-wrap rounded border bg-muted/30 p-3 max-h-96 overflow-auto">
+            {scriptContent}
+          </pre>
           <div className="flex gap-2 flex-wrap">
-            <Button size="sm" variant="default" onClick={handleLoadInCopilot}>
-              Load in Copilot to test
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              asChild
-            >
-              <a href={resultUrl} target="_blank" rel="noreferrer">
-                Open in Google Docs
-              </a>
-            </Button>
             <Button size="sm" variant="ghost" onClick={handleClearResult}>
               Clear
             </Button>
