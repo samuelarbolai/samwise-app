@@ -78,6 +78,21 @@ export default function ForExpertsPage() {
   const [script, setScript] = useState<LoadedScript | null>(null)
   const [state, setState] = useState<SessionState | null>(null)
 
+  // "Load custom script by email" on the URL gate — therapists pick from
+  // their previously synthesized scripts directly here.
+  const [customLookupEmail, setCustomLookupEmail] = useState("")
+  const [customLookupLoading, setCustomLookupLoading] = useState(false)
+  const [customLookupError, setCustomLookupError] = useState<string | null>(null)
+  const [customLookupResults, setCustomLookupResults] = useState<
+    | Array<{
+        scriptId: string
+        frameworkName: string
+        createdAt: number | null
+        contentPreview: string
+      }>
+    | null
+  >(null)
+
   // Restore last session on mount if one exists in localStorage.
   // Also handles the "Load in Copilot to test" handoff from the
   // Build custom samwise editor: if copilot:pending-script-id is set,
@@ -116,6 +131,61 @@ export default function ForExpertsPage() {
       setDocUrl(restored.docUrl)
     }
   }, [])
+
+  const handleCustomLookup = async () => {
+    const email = customLookupEmail.trim()
+    if (!email) return
+    setCustomLookupLoading(true)
+    setCustomLookupError(null)
+    setCustomLookupResults(null)
+    try {
+      const r = await fetch(
+        `/api/build-custom/therapist-scripts?email=${encodeURIComponent(email)}`
+      )
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${r.status}`)
+      }
+      const j = (await r.json()) as {
+        scripts: Array<{
+          scriptId: string
+          frameworkName: string
+          createdAt: number | null
+          contentPreview: string
+        }>
+      }
+      setCustomLookupResults(j.scripts)
+    } catch (err) {
+      setCustomLookupError(
+        err instanceof Error ? err.message : "Lookup failed"
+      )
+    } finally {
+      setCustomLookupLoading(false)
+    }
+  }
+
+  const handleLoadCustomScript = async (id: string) => {
+    setIsLoading(true)
+    try {
+      const loaded = await loadCustomScript(id)
+      const cfg = configForScriptType(loaded.scriptType)
+      if (!cfg) {
+        toast.error(`Unsupported scriptType: "${loaded.scriptType}"`)
+        return
+      }
+      setScript(loaded)
+      setState(makeEmptyState(cfg.variables))
+      toast.success("Custom script loaded", {
+        description: `${loaded.phases.length} phases · scriptType=${loaded.scriptType}.`,
+      })
+    } catch (err) {
+      toast.error("Could not load custom script", {
+        description: err instanceof Error ? err.message : "Unknown error.",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleLoad = async () => {
     if (!docUrl.trim()) return
@@ -324,6 +394,84 @@ export default function ForExpertsPage() {
                     </>
                   )}
                 </Button>
+              </FieldGroup>
+
+              <div className="my-8 flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex-1 h-px bg-border" />
+                <span>or load a custom script</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="custom-lookup-email">
+                    Therapist email
+                  </FieldLabel>
+                  <Input
+                    id="custom-lookup-email"
+                    type="email"
+                    placeholder="therapist@example.com"
+                    value={customLookupEmail}
+                    onChange={(e) => setCustomLookupEmail(e.target.value)}
+                    disabled={customLookupLoading || isLoading}
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCustomLookup}
+                  disabled={
+                    !customLookupEmail.trim() ||
+                    customLookupLoading ||
+                    isLoading
+                  }
+                  className="w-full"
+                >
+                  {customLookupLoading ? (
+                    <>
+                      <Spinner className="mr-2" />
+                      Searching…
+                    </>
+                  ) : (
+                    "Find custom scripts"
+                  )}
+                </Button>
+                {customLookupError && (
+                  <p className="text-sm text-destructive">
+                    {customLookupError}
+                  </p>
+                )}
+                {customLookupResults &&
+                  customLookupResults.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No custom scripts found for that email.
+                    </p>
+                  )}
+                {customLookupResults && customLookupResults.length > 0 && (
+                  <ul className="space-y-2">
+                    {customLookupResults.map((s) => (
+                      <li
+                        key={s.scriptId}
+                        className="border rounded-md p-3 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => handleLoadCustomScript(s.scriptId)}
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-medium text-sm">
+                            {s.frameworkName}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {s.createdAt
+                              ? new Date(s.createdAt).toLocaleString()
+                              : "—"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {s.contentPreview || "(empty)"}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </FieldGroup>
             </div>
           )}
