@@ -57,6 +57,38 @@ Reach out and push them toward booking the call.
   });
 }
 
+// Notify: a new user just started designing a ritual via /start (the
+// inverted onboarding flow). Fires only on FRESH ritualDoc creation —
+// not on idempotent returns. Use this to jump in on a parallel call
+// and guide them through the editor.
+export async function notifySamuelOfOnboardingStart(args: {
+  ritualDocId: string;
+  workspaceToken: string;
+}): Promise<void> {
+  const { ritualDocId, workspaceToken } = args;
+  const editorUrl = `https://app.samwise.life/ritual-doc/${ritualDocId}`;
+  const subject = 'A new ritual is being designed.';
+  const text = `Someone just landed on /start and a fresh ritualDoc was created.
+
+Editor: ${editorUrl}
+Workspace token: ${workspaceToken}
+
+They are filling the editor now — jump in.
+`;
+  const html = adminEmailShell({
+    subject,
+    lead: 'A new ritual is being designed.',
+    rows: [
+      { label: 'Editor', value: editorUrl },
+      { label: 'Workspace token', value: workspaceToken },
+    ],
+  });
+  await getDb().collection('mail').add({
+    to: SAMUEL,
+    message: { subject, text, html },
+  });
+}
+
 // Notify: a prospect just BOOKED a call via /book.
 export async function notifySamuelOfBooking(args: {
   name: string;

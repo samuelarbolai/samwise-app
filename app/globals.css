@@ -1310,3 +1310,27 @@
     width: 100%;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Beat transition — adapts samwise-landing's PinFadeScene/CtaBlockReveal
+   primitive (opacity 0→1 + small Y rise) into a click-driven entrance.
+   Used by /ritual-doc/[id] when switching tabs so the swap feels like
+   moving between beats of a story, not flicking between digital tabs.
+   Same easing curve as the sidebar nav's open/close transition
+   (cubic-bezier(0.2, 0.8, 0.2, 1)) — keep consistent across the app.
+   ════════════════════════════════════════════════════════════════════ */
+@keyframes beat-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.beat-in {
+  animation: beat-in 400ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+
+/* .cta--primary rules were attempted here but Turbopack's CSS HMR
+   silently dropped them (same bug as .fullscreen-glow earlier this
+   session). The Seal CTA in app/ritual-doc/[id]/OnboardingSealButton.tsx
+   now uses inline Tailwind utilities + explicit <span> dashes with
+   React state for hover instead. Don't reintroduce the .cta--primary
+   class here unless Turbopack's CSS pipeline is fixed upstream. */

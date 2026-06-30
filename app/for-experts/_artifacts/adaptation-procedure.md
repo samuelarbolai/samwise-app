@@ -144,7 +144,32 @@ Framework adaptations MAY add framework-specific variables. The canonical names 
 
 > **Note:** the earlier Samwise scripts used a longer variable list (`feelings_during_relapse`, `thoughts_during_relapse`, `view_of_their_life_in_that_moment`, etc.). Those belong to Samwise's own arrival path (the demo's Phase 5b 9-step capture); they are NOT canon for therapist-customized scripts. A therapist using their own arrival path will produce different variables — what matters is that the canonical Ritual variables above end up populated by the time the user reaches the Ritual.
 
-### 1.5 Vocabulary blacklist — forbidden in spoken text under any framework (canon)
+### 1.5 Spoken-text composition — questions over explanations (canon)
+
+SAY blocks default to **asking, not telling**. The user does the work of changing; the therapist's job is to invite, listen, validate, and redirect — not to explain.
+
+**Rules for SAY blocks:**
+
+- **Default shape: one short question** (1–2 sentences) that invites the user to speak. The user should be the one elaborating, not the therapist.
+- **A long SAY block (more than ~3 sentences) requires explicit justification.** Long blocks are almost always a sign the script is doing the user's work for them. Common-but-wrong instinct: "let me explain the framework first, then ask." Right instinct: "ask the question; if the user gets stuck, then a NOTE block tells me when to optionally explain."
+- **Explanations go in NOTE blocks, not SAY blocks**, and they are flagged as **optional** — the therapist decides in the moment whether to deploy them. Format: `☞ If the user gets stuck on X, you can optionally explain: "…"`. The therapist reads the optional explanation only when the user needs it; otherwise, they skip it and keep asking questions.
+- **The user speaks more than the therapist. Always.** This is the test for whether the script is structured correctly. If a therapist reading the script would talk more than the user, the script is wrong.
+
+**Why this matters:** a therapist who explains too much produces compliant agreement, not real change. The user nods, the therapist feels heard, nothing shifts. The script's bias toward questions enforces this discipline at the prompt level so the therapist doesn't have to fight it in the moment.
+
+**Example — the same beat, wrong vs. right:**
+
+✗ **Wrong (overlong SAY, therapist doing the work):**
+> `[SAY]` La creencia que tienes — "no merezco protección" — es lo que en CPT llamamos un *stuck point*. Es una creencia que se formó después del evento original como un atajo predictivo: tu mente armó una regla rápida para protegerte de algo similar en el futuro. El problema es que esta regla se ha quedado congelada y ahora interfiere con tu vida actual porque te lleva a evitar situaciones que en realidad son seguras. Lo que vamos a hacer juntos es desafiar esta creencia con la evidencia real de tu vida actual para construir una versión más precisa. `[/SAY]`
+
+✓ **Right (short SAY question + optional NOTE explanation):**
+> `[SAY]` Esta creencia que tienes — "no merezco protección" — ¿desde cuándo te acuerdas tenerla? `[/SAY]`
+>
+> `☞ If the user asks why you're asking, you can optionally explain:` *"Porque las creencias que vienen de un evento difícil suelen ser más rígidas que las que ya teníamos. Saber cuándo empezó nos ayuda a desafiarla mejor."*
+
+The right version is shorter, hands the floor to the user, and only deploys the explanation if asked. The therapist always has the option but never the obligation.
+
+### 1.6 Vocabulary blacklist — forbidden in spoken text under any framework (canon)
 
 - **paciente** → use "persona", the user's name, or drop the noun
 - **comportamiento autodestructivo** → use `{{behaviour_to_change}}` or a soft frame ("lo que estás cambiando")
@@ -155,7 +180,7 @@ These apply even in teaching phases, even when the framework's source material u
 
 Internal reasoning / clinician notes / cleaning prompts / chain-of-thought may use any term. The constraint is on OUTPUT the prospect hears or reads.
 
-### 1.6 Samwise's own arrival path — EXAMPLE, not canon
+### 1.7 Samwise's own arrival path — EXAMPLE, not canon
 
 The following are Samwise's specific arrival path components. They are documented here as reference for therapists who want to see one fully-worked example of how an arrival path can lead to the Ritual. A therapist's framework MAY adopt these wholesale, partially, or not at all.
 
@@ -238,8 +263,8 @@ Do NOT ask the therapist what their arrival path should be. Propose. They edit i
 
 **Step 3 — Compose the per-therapist script as ONE Doc with two parts:**
 
-a. The inferred arrival path (Step 2). Use `[SAY] / [/SAY]` markers for spoken text and `{{variable}}` slots for the Ritual inputs as they get captured along the path. Use the framework's phase naming convention (could be "Session 1 / 2 / 3", could be "Phase A / B / C", could be the framework's own labels).
-b. The canonical Ritual (§1.2) + Daily AI Call (§1.3) appended verbatim, with `{{variable}}` slots populated by what the arrival path surfaced.
+a. The inferred arrival path (Step 2). Use `[SAY] / [/SAY]` markers for spoken text and `{{variable}}` slots for the Ritual inputs as they get captured along the path. **Every phase boundary MUST be a `Phase N — Title` line** (em-dash with whitespace on both sides, N is an integer or N.M decimal). The framework's own session/step naming is preserved INSIDE the title — e.g. `Phase 1 — Session 1: Psychoeducation`, not `Session 1 — Psychoeducation`. Markdown `##` / `###` headings are silently dropped by the copilot's parser; only `Phase N — Title` registers.
+b. The canonical Ritual (§1.2) + Daily AI Call (§1.3) appended verbatim, with `{{variable}}` slots populated by what the arrival path surfaced. The Ritual's four components and the Daily Call's four beats are each their own `Phase N — Title` section.
 
 **Step 4 — Sweep your output against §1.5's blacklist.** Any spoken-text occurrence of *paciente / recaída / terapia / comportamiento autodestructivo* must be rewritten, even when the framework's source material uses these terms.
 

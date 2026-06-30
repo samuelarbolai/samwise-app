@@ -1,772 +1,976 @@
-# current-plan.md — Document-focused Agent: therapist builds their own Samwise
+# current-plan.md — Inverted onboarding (Start Now → /start → minimal ritual → seal)
 
-> **Overwrites the previous plan** ("Onboarding mode in /copilot" — SHIPPED and live as of 2026-06-24).
-> **Status: PROPOSAL ONLY. No file edits yet.** Awaiting explicit "go" before any code or Doc is created.
-> **Touches three repos:** `samwise-app` (anchor, this file), `samwise-backend/cloud-functions` (synthesizer), `samwise-backend/ritual-agent` (voice-refine — deferred).
-> **Spans phases A–F**; only A–D ship in this task. E–F (voice-refine, quick fit test) are explicitly deferred per the user's answers. Canon spec is also deferred — emerges from running the procedure on a real example.
-> **Mirror discipline applies** to the surface (mirror `RegisterRitualCard` + the `/for-experts` sidebar view-state pattern) and to the cloud function (mirror `createRitualDoc`'s `drive.files.copy + docs.batchUpdate` pattern verbatim).
+> **Overwrites the previous plan** (the Tiptap ritual editor — SHIPPED 2026-06-29). The editor is the foundation this plan builds on.
+> **Status: PROPOSAL. No code on disk yet.** Awaiting explicit "go" before any file is created or edited.
+> **Touches three repos:** `samwise-landing` (rewire Start Now CTAs only — no visual change), `samwise-app` (new `/start` route + onboarding-mode in `/ritual-doc/[id]` + workspace-token), `samwise-backend/cloud-functions` (new `registerRitualFromTiptap` CF).
+> **NO agent integration in v1** — Samuel is the human guide on a parallel channel. No new LiveKit work.
+> **Mirror discipline applies** (memory `feedback_mirror_dont_reimagine`):
+>   - workspace-token pattern → mirror `samwise-app/app/trip/page.tsx` + `lib/workspace-token.ts` verbatim (per `samwise-app-trip` skill)
+>   - `registerRitualFromTiptap` cloud function → mirror `registerNewRitual`'s shape verbatim, just swap Google Doc reading for Firestore `ritualDocs/{id}` reading (per `ritual-synthesis-prompt` skill — same synthesis prompt, same RitualData output)
+>   - `/start` route shape → mirror `app/trip/page.tsx` (bootstrap → ensure workspace → redirect) verbatim
+>   - landing Start-Now rewire → keep canonical untouched VISUALLY; modify only `handleStartClick` destination + the two `<a href>` attributes (per `samwise-landing-page` skill: variant rule is about visual experiments, not funnel rewires)
+> **Vocabulary blacklist (script-work Rule 7) is enforced** in all `/start` copy: never `paciente / comportamiento autodestructivo / recaída / terapia`.
 
 ## Plan Summary
 
-A therapist who is curious about Samwise can produce their **own custom Samwise script Doc** by feeding the system their framework material (PDF, URL, or pasted text). The flow:
+A new user clicks **Start Now** on the landing → the gold-star transition fires as today → cross-origin navigation to `app.samwise.life/start?from=transition` → app mints a `samwise.ritual.workspaceToken` in localStorage and creates a fresh `ritualDocs/{id}` → redirects to `/ritual-doc/{id}?mode=onboarding`.
 
-1. Therapist opens `/for-experts` → clicks new sidebar item **"Build custom samwise"** (third sibling to "Copilot" and "Register Ritual"; same view-state pattern, no route change).
-2. They either (a) **paste their own framework material** (PDF / URL / textarea) to produce a NEW custom samwise script Doc, OR (b) **paste a previously-generated Doc link** to continue iterating on it (mirrors `/ritual-call`'s doc-link hydration pattern).
-3. The "produce a new Doc" path POSTs to a new cloud function `synthesizeCustomScript` (samwise-backend/cloud-functions), which: ingests the framework material, reads the **Samwise Adaptation Procedure Google Doc** (the canonical procedure that defines how to adapt Samwise to any framework), copies the **Samwise Custom Script Template Google Doc** into a parent folder, fills the copy by walking the procedure with Gemini, and returns `{ documentId, documentUrl }`.
-4. The therapist gets the Doc link, opens it in Google Docs, edits freely, and can return to `/for-experts` later to re-hydrate by pasting the same link.
-5. (Phase E, deferred) — a voice-refine flow in `ritual-agent` walks the therapist through reviewing/refining the draft conversationally, mirroring `ritual-design`.
-6. (Phase F, deferred) — a quick fit test surface lets the therapist run their custom script in a copilot-sandbox without recruiting a real patient.
+**NO FORMS.** Every captured field is a Tiptap subsection — H2 heading + empty paragraph the user types into. Samuel (or a future agent) verbally guides the user through what to type where. The ONE exception is a tiny inline **Voice pill toggle** (Male | Female) above the Voice H2 inside the Metadata tab; click writes "male" or "female" as the paragraph below the heading via editor commands. Aesthetically continuous with the editor, not a wizard.
 
-The whole synthesis is anchored on TWO Google Docs the user co-authors with Claude in Phase A:
+The editor in onboarding mode shows ONLY the minimum-viable-ritual surface:
 
-- **Samwise Adaptation Procedure** — the human-readable procedure that defines: what is canonical Samwise (variables, phases, mandatory beats, vocabulary blacklist) and what is swappable (framework-specific metaphors, exercises, ordering). Lives as a Google Doc so it iterates live without redeploy. The synthesizer reads it on every call via Drive API.
-- **Samwise Custom Script Template** — a **funnel-wide manifest Google Doc** with one section per Samwise surface (Qualification prompts / Demo Call / Onboarding / Behavioural-design "Possible Origins" tab spec / Call Design / Daily AI agent prompts). Each section preserves its parent surface's structural conventions verbatim (`[SAY]/[/SAY]` markers, `Phase N — title` headers, `[TYPE: …]` and `[END]` markers, `{{variable}}` slots). The synthesizer `drive.files.copy`'s the manifest for every new therapist, then fills the `[PLACEHOLDERS]` via `docs.batchUpdate`. Mirrors the canonical-template pattern of `createRitualDoc` and `RITUAL_TEMPLATE_DOC_ID` — just bigger. Single Doc keeps v0 simple; therapist gets one link and scrolls.
+- **Metadata tab** — Tiptap, EXTENDED subsection list visible in onboarding mode:
+  - Name · Language · **Voice** (with the inline pill toggle above the H2) · Phone number · Timezone · Behaviour I'd like to change · Core motivation · Call schedule
+  - Hidden in onboarding mode (visible in full mode for review/edit): userID, voiceID (both auto-set; technical)
+- **Ritual Call tab** — the 4 canonical beats as Tiptap H2 headings (Exit from the day / Entry into the work / Intentions / The pact), user fills underneath. Unchanged from full mode.
+- **Ritual tab** — ONLY two H2 subsections visible: **Mantras de desidentificación** and **Generación de bloqueador**. The other 7 (Mantras de esperanza / Helpers / Procedure / Construcción de nueva fe / Surrender / second Procedure / Schedules) are HIDDEN visually but PRESERVED in the saved doc as empty scaffolding for later optimization moments.
+- **Lapse Map / Possible origins / Behavioural picture tabs** are HIDDEN in onboarding mode (also preserved in the doc, visible in full mode).
 
-  **Why funnel-wide, not Demo-only:** real frameworks have components that land at DIFFERENT points in the funnel, not all at Phase 8 of the Demo. Established example (Phase B, CPT): Impact Statement enriches the Qualification capture, Trauma Account replaces the Possible Origins map (Onboarding/behavioural-design), Worksheets land in TWO slots simultaneously (Phase 8 mantra construction AND the Optimization session as a recovery tool). A Demo-only template would have nowhere to put 4 of those 5 placements.
+A persistent **step-progress strip** at the top (Metadata 1/3 → Ritual Call 2/3 → Ritual 3/3) + a final **Seal ritual** button at the bottom of the Ritual tab.
 
-**No new infra primitives.** The synthesizer reuses the cloud-functions module's lazy Google auth singletons (`getDriveClient`, `getDocsClient`), the same `FIREBASE_SERVICE_ACCOUNT` secret, and the same Gemini setup that `cleanVariable` / `extractDemoCall` already use. Three new env vars: `SAMWISE_PROCEDURE_DOC_ID`, `SAMWISE_TEMPLATE_DOC_ID`, `SAMWISE_CUSTOM_PARENT_FOLDER_ID`.
+**Seal click** → POST to a new cloud function `registerRitualFromTiptap(ritualDocId)` which:
 
-**Aesthetic / UX discipline.** Mirror `RegisterRitualCard` exactly — `<FieldGroup>` / `<Field>` / `<Input>` / `<Textarea>` / `<Button>`, no `<Card>` wrapper, no icon-in-circle. Three input modes selectable via radio (Text / URL / PDF). Single "Build custom samwise script" submit button. Below that, a second `<FieldGroup>` for the "Continue from existing Doc" path: paste link → caches to localStorage (no Drive read needed at this surface — the link itself is the artifact). localStorage caches the last-built Doc URL so a returning therapist sees it on mount.
+1. Reads `ritualDocs/{ritualDocId}` from Firestore (NOT a Google Doc — that's the whole point of this round).
+2. Serializes the Metadata tab from Tiptap JSON → plain text. **Regex-extracts the structured Metadata fields** (Name, Language, Voice, Phone, Timezone) from the paragraphs under each H2 — same pattern `registerNewRitual` uses today on the Google Doc's Metadata tab. Voice ("male" | "female") combined with Language (en | es) derives `voiceID` via the same table that lives in samwise-backend/ritual-agent/src/config/voiceIds.ts.
+3. Serializes the 3 synthesis-relevant tabs (Ritual Call, Ritual, Behavioural picture) from Tiptap JSON → plain-text Markdown sections (preserving H2/H3 hierarchy as `##` / `###`).
+4. ALSO serializes the "Behaviour I'd like to change" + "Core motivation" + "Call schedule" subsections from the Metadata tab — they become part of the raw material fed to the synthesis prompt.
+5. **Feeds the assembled raw material to the SAME existing `ritual_synthesis_prompt.txt`** (single source of truth — do NOT fork the prompt) to get back `{ userInputs, schedules, fallbackSchedules, behaviorLabel }`. Schedule times typed in the Call Schedule subsection are extracted via the synthesis prompt's existing Rule 10 (`DAY_HH:MM` format).
+6. Writes `rituals/{newRitualId}` with the SAME `RitualData` shape `registerNewRitual` produces today (`agentConfig`, `schedules`, `timeZone`, `googleDocId` left empty + new `ritualDocId` field, `label`, `behaviorLabel`, `fallbackActive: false`).
+7. Upserts `users/{userID}` (where `userID` = the workspace token — derived once, persistent).
+8. Returns `{ ritualId }`.
+
+After seal: app navigates the user to a **success screen** showing first call time + a soft invitation to return ("Come back to refine the rest of your ritual. There's more we can shape together.").
+
+**Future visits** to `/ritual-doc/{id}` WITHOUT `?mode=onboarding` → the full editor (all 6 tabs, all subsections) — for ongoing optimization moments. The workspace token persists in localStorage so the user can return from any device that has it.
+
+**NOT in scope for v1** (deferred — pick one per follow-up):
+- Recovery flow ("email me my link" if localStorage cleared)
+- The "real" agent guide (LiveKit-based) embedded in the editor — Samuel is the guide via parallel call
+- Multi-device sync (workspace token is per-browser; user shares it manually for now)
+- Cron-firing verification harness for the new sealed rituals (existing cron consumes the same `rituals/{id}` shape, so it should "just work" — but a sanity-check harness is a worthy follow-up)
+- The /qualify route's deprecation (keeping it alive for external/TikTok funnels)
 
 ## Plan Architecture (Flow)
 
 ```
-                       ┌─────────────────────────────────────────────┐
-                       │  /for-experts  page.tsx                     │
-                       │  ExpertView = "copilot" | "register"        │
-                       │                       | "build-custom" (NEW)│
-                       └────┬──────────┬───────────────┬─────────────┘
-                            │          │               │
-                       copilot     register       build-custom
-                            │          │               │
-                            │     <RegisterRitual─┐    │
-                            │      Card />        │    ▼
-                            │                     │  ┌──────────────────────────────────┐
-                            │                     │  │ <BuildCustomScriptCard /> (NEW)  │
-                            │                     │  │  • Mode: Text | URL | PDF        │
-                            │                     │  │  • Submit → POST                 │
-                            │                     │  │    synthesizeCustomScript        │
-                            │                     │  │  • OR paste existing Doc link    │
-                            │                     │  │    → hydrates from localStorage  │
-                            │                     │  └──────────┬───────────────────────┘
-                            │                     │             │
-                            │                     │             ▼
-                            │                     │   ┌─────────────────────────────────┐
-                            │                     │   │  cloud-functions:               │
-                            │                     │   │  synthesizeCustomScript (NEW)   │
-                            │                     │   │  1. Extract framework text      │
-                            │                     │   │     (PDF → pdf-parse, URL →     │
-                            │                     │   │     fetch + readability, text)  │
-                            │                     │   │  2. drive.export(               │
-                            │                     │   │     SAMWISE_PROCEDURE_DOC_ID)   │
-                            │                     │   │  3. drive.files.copy(           │
-                            │                     │   │     SAMWISE_TEMPLATE_DOC_ID)    │
-                            │                     │   │     → newDocId                  │
-                            │                     │   │  4. Gemini fill: walk procedure │
-                            │                     │   │     + framework text + template │
-                            │                     │   │     → batchUpdate replaceAllText│
-                            │                     │   │  5. Return { documentId,        │
-                            │                     │   │     documentUrl }               │
-                            │                     │   └─────────────────────────────────┘
-                            │                     │             │
-                            │                     │             ▼
-                            │                     │   ┌──────────────────────────────────┐
-                            │                     │   │  Per-therapist Samwise Doc       │
-                            │                     │   │  (owned by SA, in parent folder, │
-                            │                     │   │  Editor-shared to therapist email│
-                            │                     │   │  if provided)                    │
-                            │                     │   └──────────────────────────────────┘
-                            │
-                       (existing — unchanged)
+┌──────────────────────────────────────────────────────────────────────────┐
+│  samwise-landing — canonical /                                          │
+│                                                                          │
+│  <a href="/qualify" onClick={handleStartClick}>Start now</a>  ──┐       │
+│         (nav AND hero, both wired to handleStartClick)          │       │
+│                                                                  ▼       │
+│  handleStartClick:                                                       │
+│   1. setIsLeaving(true)                                                  │
+│   2. append gold-star overlay to body                                    │
+│   3. at t=525ms: window.location.href = `${APP_URL}/start?from=transition`│
+│      (CHANGED from `router.push("/qualify")`)                            │
+└──────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ cross-origin navigation
+                                  │ (~200-500ms unavoidable white flash;
+                                  │  app's /start fades in to mask it)
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  samwise-app — /start                                                    │
+│                                                                          │
+│  app/start/page.tsx (client):                                            │
+│   1. Read or mint `samwise.ritual.workspaceToken` (localStorage)         │
+│   2. POST /api/ritual-doc/create-for-workspace { token }                 │
+│      → returns { id } (creates ritualDocs/{id} with workspaceToken set)  │
+│   3. router.replace(`/ritual-doc/${id}?mode=onboarding&from=transition`) │
+│                                                                          │
+│  Read `?from=transition` → render brief fade-in (opacity 0 → 1, 400ms)   │
+│  to mask the cross-origin white flash.                                   │
+└──────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  /ritual-doc/[id]?mode=onboarding                                        │
+│                                                                          │
+│  Existing editor + new "onboarding mode" layer:                          │
+│   - SidebarNav items filtered to: Metadata · Ritual Call · Ritual        │
+│   - Metadata tab renders OnboardingMetadataForm (form fields, not tiptap)│
+│   - Ritual tab tiptap shows ONLY Mantras de desid. + Generación de bloq. │
+│     (other H2s hidden via runtime ProseMirror node filter OR by seeding  │
+│      a minimal template — see Phase 3 decision in Step 3.3)              │
+│   - Top of page: step-progress strip (1/3 / 2/3 / 3/3)                   │
+│   - Bottom of Ritual tab: <SealRitualButton />                           │
+│                                                                          │
+│  Seal click → POST /api/ritual-doc/[id]/seal                             │
+└──────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  /api/ritual-doc/[id]/seal (samwise-app)                                 │
+│                                                                          │
+│  Server: POST → forward to cloud function:                               │
+│   fetch(REGISTER_RITUAL_FROM_TIPTAP_URL, {                               │
+│     body: { ritualDocId: id }                                            │
+│   })                                                                     │
+│  Returns { ritualId, firstCallAt }                                       │
+└──────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  samwise-backend/cloud-functions: registerRitualFromTiptap (NEW)         │
+│                                                                          │
+│  1. db.collection("ritualDocs").doc(ritualDocId).get()                   │
+│  2. Pluck metadata fields (typed) + qualification fields                 │
+│  3. Serialize 3 tabs (ritualCall, ritual, behaviouralPicture)            │
+│     from Tiptap JSON → Markdown sections                                 │
+│  4. Build raw material: Metadata block + qualification block +           │
+│     3 Markdown sections + the schedule times the user picked             │
+│  5. Call Gemini with EXISTING ritual_synthesis_prompt.txt                │
+│     → { userInputs, schedules, fallbackSchedules, behaviorLabel }        │
+│  6. Override schedules with the user-picked times (dedupe with extracted)│
+│  7. Build RitualData; write to rituals/{newId}                           │
+│  8. Upsert users/{userID} (userID = workspaceToken from ritualDoc)       │
+│  9. Return { ritualId, firstCallAt }                                     │
+└──────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  /ritual-doc/[id]?mode=onboarding&sealed=1                               │
+│                                                                          │
+│  Success screen:                                                          │
+│   "Your first call is at [firstCallAt]. Come back to refine the rest."   │
+│   [ Open my ritual doc → ] (drops ?mode=onboarding for the full editor)  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
-
-**Hydration path** (returning therapist):
-
-- Therapist pastes their previously-generated Doc URL into the "Continue from existing Doc" Field on `BuildCustomScriptCard`.
-- The card writes it to `localStorage` under `custom-script:last-doc` (mirrors `/ritual-call`'s doc-link hydration), then renders an "Open in Docs" link + (Phase D.3 optional) a "Load into Copilot" button.
-- "Load into Copilot" sets `view` back to `"copilot"`, pastes the URL into the URL gate, and triggers the existing `loadCallScript` flow — the custom script renders in `/for-experts` exactly like any other script (it parses `[TYPE: custom]`; for v0 the template carries demo's structural shape so demo-mode rendering falls through cleanly — a `[TYPE: custom]` first-class config router is a Phase F follow-up).
 
 ## Plan Structure (Directories and files)
 
 ```
+samwise-landing/
+└── app/page.tsx                                  # MOD: handleStartClick destination only; 2x <a href> attrs
+
 samwise-app/
-├── current-plan.md                                # THIS FILE
 ├── app/
-│   └── for-experts/
-│       └── page.tsx                               # MODIFIED — extend ExpertView union (1 line) + sidebar
-│                                                  # item (~8 lines) + view block (1 line) + header label
-│                                                  # (1 line). Nothing else in this file moves.
-└── components/
-    └── build-custom-script-card.tsx               # NEW — self-contained card, mirror of <RegisterRitualCard>'s
-                                                  # shape (no Card wrapper, FieldGroup / Field / Input /
-                                                  # Textarea / Button only). Owns its own state + fetch.
+│   ├── start/                                    # NEW
+│   │   └── page.tsx                              # mint token → create ritualDoc → redirect
+│   ├── ritual-doc/[id]/                          # MOD: onboarding-mode layer
+│   │   ├── page.tsx                              # MOD: read ?mode=onboarding searchParam, pass down
+│   │   ├── RitualDocEditor.tsx                   # MOD: filter NAV in onboarding mode; render OnboardingMetadataForm in Metadata tab; render success screen on ?sealed=1
+│   │   ├── OnboardingMetadataForm.tsx            # NEW: form fields for Metadata + trimmed qualification + schedule pickers
+│   │   ├── OnboardingProgressStrip.tsx           # NEW: 1/3 - 2/3 - 3/3 indicator
+│   │   ├── OnboardingSealButton.tsx              # NEW: bottom-of-Ritual-tab CTA, calls /api/ritual-doc/[id]/seal
+│   │   ├── OnboardingSuccessScreen.tsx           # NEW: "Your first call is at..." + "Open my ritual doc" CTA
+│   │   └── (existing EditorPane.tsx, SaveStatus.tsx, ImmerseToggle.tsx unchanged)
+│   └── api/ritual-doc/
+│       ├── create-for-workspace/route.ts         # NEW: POST { token } → creates ritualDocs with workspaceToken field
+│       └── [id]/seal/route.ts                    # NEW: POST → forwards to registerRitualFromTiptap CF
+├── lib/
+│   ├── ritual-doc/
+│   │   ├── schema.ts                             # MOD: add Metadata structured fields + qualification fields + schedule + workspaceToken to RitualDoc type
+│   │   ├── storage.ts                            # MOD: createRitualDocForWorkspace(token) + setMetadata(id, fields) + setQualification(id, fields) + setSchedule(id, times)
+│   │   └── tiptap-to-markdown.ts                 # NEW: serializes Tiptap JSON → Markdown (H2 → ##, H3 → ###, paragraph → text+blank line)
+│   ├── workspace-token.ts                        # NEW: mirrors lib/workspace-token.ts from /trip (mint, read, validate)
+│   └── ritual-doc/onboarding-mode.ts             # NEW: VISIBLE_TAB_KEYS_ONBOARDING + VISIBLE_SUBSECTIONS_ONBOARDING; isOnboardingMode(searchParams) helper
 
-samwise-backend/
-└── cloud-functions/
-    └── functions/
-        ├── src/
-        │   └── index.ts                           # MODIFIED — append `synthesizeCustomScript` export at the
-        │                                          # end of the cloud functions list (after extractTrackingKpis
-        │                                          # at line ~3216). NO refactor of existing fns; no shared
-        │                                          # helper extraction. Mirror createRitualDoc verbatim.
-        └── package.json                           # MODIFIED — add `pdf-parse` + `@mozilla/readability` +
-                                                  # `jsdom` dependencies. No version bumps elsewhere.
-
-Google Docs (created collaboratively in Phase A, owned by the user):
-- Samwise Adaptation Procedure   — id captured in cloud-functions/.env as SAMWISE_PROCEDURE_DOC_ID
-- Samwise Custom Script Template — id captured in cloud-functions/.env as SAMWISE_TEMPLATE_DOC_ID
-
-Google Drive folder (created collaboratively in Phase B.4, owned by the user, Editor-shared to the SA):
-- "Samwise Custom Scripts" parent folder — id captured in cloud-functions/.env as
-  SAMWISE_CUSTOM_PARENT_FOLDER_ID
+samwise-backend/cloud-functions/
+└── functions/src/
+    ├── index.ts                                  # MOD: export registerRitualFromTiptap; add SYNTHESIS_TAB_TITLES_FOR_TIPTAP (mirror existing)
+    └── registerRitualFromTiptap.ts               # NEW: the function body (kept in its own file so registerNewRitual stays untouched)
 ```
-
-No new env vars on Vercel (samwise-app stays a thin client). All secrets stay in cloud-functions's `.env`. The service account already has Drive/Docs Editor permissions for the existing ritual template/parent — same trust model applies here: the user shares the new template Doc + parent folder with the service account email at the time of creation.
 
 ## Modifications (in phases and steps)
 
-### Phase A — The Samwise Adaptation Procedure Doc (collaborative)
+### Phase A — Schema + workspace-token in samwise-app
 
-**No code in this phase.** I scaffold a Google Doc with section headers and rough content drawn from `samwise-script-work` skill + the existing scripts; the user iterates the wording and decides what is canonical.
+#### Step A.1 — `lib/workspace-token.ts`
 
-**Step A.1 — Create the Google Doc**
-
-- **Where:** Google Drive, sibling of the existing Samwise Ritual Template Doc. Title: `Samwise Adaptation Procedure`.
-- **Should NOT be modified:** the existing master Vibe doc (`10PED7oJeRhUqvZTT6ubUFC2QAYMcFkRFpGkPlFmMkgI`) or the Samwise script Docs (Demo, Onboarding, Call Design) — those stay untouched in this phase.
-- **Action:** the user creates the Doc, shares the id with me, and shares the Doc with the service account email as Reader. I scaffold the initial content (A.2).
-
-**Step A.2 — Scaffold initial content (I draft, user reviews)**
-
-- **Initial section outline** (content drafted by me, reviewed and tightened by the user before being declared canonical):
-  ```
-  # Samwise Adaptation Procedure
-
-  ## 0. What this document is
-  A repeatable procedure for adapting Samwise to a therapist's existing framework
-  (CPT, Brief Strategic, ITAA 12-steps, anything else). Read by humans AND by the
-  synthesizeCustomScript cloud function. Edit live — no redeploy required.
-
-  ## 1. What is canonical Samwise (NEVER swap out)
-  - The 4-beat call structure (Exit from the day / Entry into the work /
-    Intentions / The pact).
-  - Variables that must always exist:
-      enemy_name, scary_reality, unsettling_reality, behaviour_to_change,
-      core_motivation, symbolic_anchor_description, helpers_list, …
-    (Full list extracted from samwise-script-work skill — confirm with user.)
-  - Mandatory beats: Phase 1.5 reflection, Phase 5b 9-step structure,
-    admission-test scarcity beats, the Phase 11 verdict line.
-  - Vocabulary blacklist (Rule 7): paciente / comportamiento autodestructivo /
-    recaída / terapia → forbidden in spoken text.
-  - The mission framing: "help the user decide whether to help themselves."
-
-  ## 2. What is swappable per framework
-  - Framework-specific metaphors (CPT's "stuck points", ITAA's "the disease",
-    Brief Strategic's "attempted solutions" — pick the framework's own language).
-  - The teaching content in Phase 6 (how the framework explains the loop).
-  - The exercises in Phase 8 (mantra construction vs. cognitive worksheet vs.
-    step-9 amends list vs. paradoxical injunction, depending on framework).
-  - The closing reframe in Phase 12 (in the framework's own terms).
-
-  ## 3. The synthesis procedure (what the LLM does, step by step)
-  Step 1: Read the framework material. Identify:
-    - The framework's name for the problem ("addiction", "stuck pattern", …)
-    - The framework's primary metaphor or model
-    - The framework's signature exercise or intervention
-    - The framework's stance on the user's agency (high / medium / low)
-  Step 2: Map each canon variable to the framework's vocabulary.
-    - enemy_name → the framework's term for the antagonist
-    - scary_reality → the framework's term for the problem state
-    - …
-  Step 3: For each [PLACEHOLDER] in the Custom Script Template, write a
-    framework-specific phrasing that preserves the canon beat's intent.
-  Step 4: Sweep for vocabulary blacklist violations (Rule 7) — never let a
-    framework's own term reintroduce paciente / recaída / etc. into spoken text.
-  Step 5: Output is the FILLED template Doc.
-
-  ## 4. Worked examples (Phase B will fill these by hand)
-  ### 4.1 CPT (Cognitive Processing Therapy)
-  …filled in Phase B…
-  ### 4.2 ITAA 12-steps
-  …filled in Phase B…
-
-  ## 5. Hard constraints the LLM must check itself against
-  - Did I keep the 4-beat call structure intact? (Y/N)
-  - Did I keep every mandatory beat? (Y/N)
-  - Did I sweep the spoken text for paciente / recaída / comportamiento
-    autodestructivo / terapia? (Y/N)
-  - Did I preserve every {{variable}} slot exactly? (Y/N)
-  ```
-- **Explanation:** §1 is the load-bearing canon list. §5 is what the LLM runs in its head before returning. §4 is empty in Phase A; we fill it during Phase B by doing it manually.
-
-**Step A.3 — Capture the Doc id**
-
-- Doc id goes into `samwise-backend/cloud-functions/.env` (or `firebase functions:secrets:set`) as `SAMWISE_PROCEDURE_DOC_ID`. No code change here — just the env entry; we wire it in Phase C.
-
-### Phase B — Worked example: produce ONE custom script Doc by hand
-
-**No code in this phase.** I (Claude) act as the synthesizer; the user reviews. Picks ONE framework that stress-tests the procedure.
-
-**Step B.1 — Choose the framework**
-
-- I propose three candidates (e.g. **ITAA 12-steps**, **CPT**, **Brief Strategic Therapy**) with a one-line rationale each. User picks one. I fetch source material (a public PDF or URL of canonical framework content).
-
-**Step B.2 — Run the procedure manually**
-
-- I follow §3 of the Adaptation Procedure Doc step by step against the framework material, producing a candidate per-therapist Samwise script DRAFT in a fresh Google Doc.
-- The user reviews. We iterate until the draft passes §5's self-checks.
-- Anything I had to invent or guess (because the procedure was vague) gets added BACK into the procedure as a sharpening edit — **Phase A's Doc evolves**.
-
-**Step B.3 — Extract the Custom Script Template Doc (manifest-shaped)**
-
-- Once the worked example is solid, I produce the **Samwise Custom Script Template Doc** by stripping framework-specific content out of the worked example and leaving a funnel-wide manifest with ONE Doc-level `[TYPE: custom]` + `[VERSION: 0.1]` + `[END]` boundary, and SECTIONS per Samwise surface. Each section preserves its parent surface's marker conventions verbatim so a downstream parser (or human reader) can still extract the section as a valid script of its parent type.
-
-  ```
-  # Samwise Custom Script — Manifest
-  [TYPE: custom]
-  [VERSION: 0.1]
-
-  ## Section 1 — Qualification prompts
-  (capture format + per-variable framework semantics, with [FRAMEWORK_*] placeholders)
-
-  ## Section 2 — Demo Call script
-  [TYPE: demo]
-  …Phase 1 → Phase 17 with [SAY]/[/SAY] markers, {{variables}} preserved,
-  [FRAMEWORK_*] placeholders where framework content goes…
-  [END section]
-
-  ## Section 3 — Onboarding script
-  [TYPE: onboarding]
-  …same shape…
-  [END section]
-
-  ## Section 4 — Behavioural-design "Possible Origins" tab spec
-  (replaces/extends what the behavioural-design flow captures)
-
-  ## Section 5 — Call Design (Ritual mantras / Protection / Activity)
-
-  ## Section 6 — Daily AI agent prompt (4-beat ritual: Exit / Entry / Intentions / Pact)
-
-  [END]
-  ```
-
-- The framework-specific placeholders use a **structural-role-prefixed** name so the synthesizer prompt can reason about placement: `[ROLE_INITIAL_BELIEF_CAPTURE_FORMAT]`, `[ROLE_NARRATIVE_INTEGRATION_FORMAT]`, `[ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8]`, `[ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION]`, `[ROLE_TEACHING_OF_LOOP_AT_PHASE_6]`, `[ROLE_CLOSING_REFRAME_AT_PHASE_12]`, `[ROLE_DAILY_RITUAL_FRAMING]`, `[ROLE_METAPHOR_FOR_ENEMY]`. Same framework component MAY appear at multiple placeholders (CPT's Worksheets fill `[ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8]` AND `[ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION]` with the same source mechanism, formatted differently per slot).
-- The four canonical mandatory beats (Phase 1.5 reflection, Phase 5b 9-step, vocabulary-blacklist ☞ guidance, Phase 11 verdict) are preserved verbatim in the Demo section regardless of framework.
-- Template Doc id goes into `cloud-functions/.env` as `SAMWISE_TEMPLATE_DOC_ID`.
-
-**Step B.4 — Create the parent Drive folder**
-
-- User creates "Samwise Custom Scripts" folder in their Drive. Shares it Editor with the service account email. Id goes into `cloud-functions/.env` as `SAMWISE_CUSTOM_PARENT_FOLDER_ID`.
-
-### Phase C — The `synthesizeCustomScript` cloud function
-
-**Step C.1 — Add dependencies**
-
-- **In-file location:** `samwise-backend/cloud-functions/functions/package.json`, `dependencies` block.
-- **Should NOT be modified:** any existing dep version, `devDependencies`, scripts, engines.
-- **Add:**
-  ```json
-  "pdf-parse": "^1.1.1",
-  "@mozilla/readability": "^0.5.0",
-  "jsdom": "^24.0.0"
-  ```
-- **Explanation:** `pdf-parse` extracts text from uploaded PDFs (the therapist's framework material). `@mozilla/readability` + `jsdom` extract the main content from a fetched URL (strips ads/nav, leaves the framework body). Both are battle-tested, no native deps, fast cold-start friendly.
-
-**Step C.2 — Append `synthesizeCustomScript` to `index.ts`**
-
-- **In-file location:** `samwise-backend/cloud-functions/functions/src/index.ts` — APPEND at the end (after `extractTrackingKpis` at line ~3216). Keeps the diff a pure addition; existing functions untouched.
-- **Should NOT be modified:** every other `export const ___` in this file. No refactor, no shared-helper extraction. We mirror `createRitualDoc`'s style verbatim.
-- **Verify before pasting:** the exact symbol used by `cleanVariable` to get a Gemini client (around line 1693). The placeholder `getGeminiClient` below should be swapped for whatever's actually in `index.ts` (e.g. it may be a local `new GoogleGenerativeAI(API_KEY)` call inline; if so, repeat that inline rather than introducing a new helper).
-- **Code:**
+- **In-file location:** new file at `samwise-app/lib/workspace-token.ts`
+- **Should not be modified:** N/A
+- **Code (verbatim mirror of `/trip`'s pattern; the trip skill confirms `localStorage` key per app):**
   ```ts
-  /**
-   * synthesizeCustomScript (HTTP)
-   *
-   * Therapist-facing entrypoint for "Build a custom samwise script."
-   * Takes a framework material payload (PDF base64, URL, or pasted text),
-   * reads the Samwise Adaptation Procedure Doc, copies the Samwise Custom
-   * Script Template Doc, and fills the copy by walking the procedure with
-   * Gemini.
-   *
-   * Mirrors createRitualDoc's drive.copy + docs.batchUpdate pattern.
-   *
-   * Required env vars:
-   *   SAMWISE_PROCEDURE_DOC_ID         — Adaptation Procedure Doc.
-   *                                      Must be shared with the SA as Reader.
-   *   SAMWISE_TEMPLATE_DOC_ID          — Custom Script Template Doc.
-   *                                      Must be shared with the SA as Reader.
-   *   SAMWISE_CUSTOM_PARENT_FOLDER_ID  — Drive folder for the copies.
-   *                                      Editor-shared to the SA. Operator owns.
-   *   GEMINI_KEY                       — already set for cleanVariable
-   *                                      (NB: env var name is GEMINI_KEY,
-   *                                      not GEMINI_API_KEY — verified
-   *                                      against existing call sites).
-   */
-  export const synthesizeCustomScript = onRequest(
-    {cors: true, timeoutSeconds: 540, memory: "1GiB"},
-    async (req, res) => {
-      if (req.method !== "POST") {
-        res.status(405).send({error: "Method Not Allowed"});
-        return;
-      }
+  // Mirrors lib/workspace-token.ts from /trip — same shape, distinct
+  // localStorage key. Per samwise-app-trip skill: 8-char token, the token
+  // IS the Firestore doc id, no auth, no recovery in v1.
+  const STORAGE_KEY = 'samwise.ritual.workspaceToken';
 
-      interface SynthRequest {
-        inputMode: "pdf" | "url" | "text";
-        pdfBase64?: string;          // when inputMode = "pdf"
-        url?: string;                // when inputMode = "url"
-        text?: string;               // when inputMode = "text"
-        therapistName?: string;      // optional, for doc title
-        therapistEmail?: string;     // optional, share Doc as Editor
-        frameworkName?: string;      // optional, for doc title + procedure hint
-      }
+  const ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz'; // base31, no ambiguous chars
 
-      try {
-        const body = req.body as SynthRequest;
-        const procedureDocId = process.env.SAMWISE_PROCEDURE_DOC_ID;
-        const templateDocId  = process.env.SAMWISE_TEMPLATE_DOC_ID;
-        const parentFolderId = process.env.SAMWISE_CUSTOM_PARENT_FOLDER_ID;
-        if (!procedureDocId || !templateDocId || !parentFolderId) {
-          logger.error("synthesizeCustomScript: missing env config");
-          res.status(500).send({error: "Server misconfigured"});
-          return;
-        }
+  function mintToken(): string {
+    const out: string[] = [];
+    const buf = new Uint8Array(8);
+    crypto.getRandomValues(buf);
+    for (const b of buf) out.push(ALPHABET[b % ALPHABET.length]);
+    return out.join('');
+  }
 
-        // 1. Extract framework text from the chosen input mode.
-        let frameworkText = "";
-        if (body.inputMode === "pdf" && body.pdfBase64) {
-          const pdfParse = (await import("pdf-parse")).default;
-          const buffer = Buffer.from(body.pdfBase64, "base64");
-          const parsed = await pdfParse(buffer);
-          frameworkText = parsed.text;
-        } else if (body.inputMode === "url" && body.url) {
-          const html = await (await fetch(body.url)).text();
-          const {JSDOM} = await import("jsdom");
-          const {Readability} = await import("@mozilla/readability");
-          const dom = new JSDOM(html, {url: body.url});
-          const article = new Readability(dom.window.document).parse();
-          frameworkText = article?.textContent ?? html;
-        } else if (body.inputMode === "text" && body.text) {
-          frameworkText = body.text;
-        } else {
-          res.status(400).send({error: "Provide pdf, url, or text"});
-          return;
-        }
-        if (frameworkText.trim().length < 200) {
-          res.status(400).send({error: "Framework material too short"});
-          return;
-        }
-
-        // 2. Read the procedure Doc via Drive export (raw text — we
-        //    want the full prose, not a parsed-into-phases shape).
-        const drive = getDriveClient();
-        const procedureExport = await drive.files.export({
-          fileId: procedureDocId,
-          mimeType: "text/plain",
-        }, {responseType: "text"});
-        const procedureText = String(procedureExport.data);
-
-        // 3. Copy the template Doc into the parent folder.
-        const therapist = body.therapistName?.trim() || "Therapist";
-        const framework = body.frameworkName?.trim() || "Custom";
-        const docTitle =
-          `Samwise — ${therapist} — ${framework} — ` +
-          new Date().toISOString().slice(0, 10);
-        const copyResp = await drive.files.copy({
-          fileId: templateDocId,
-          requestBody: {name: docTitle, parents: [parentFolderId]},
-          supportsAllDrives: true,
-          fields: "id, webViewLink",
-        });
-        const documentId = copyResp.data.id;
-        const documentUrl = copyResp.data.webViewLink ??
-          `https://docs.google.com/document/d/${documentId}/edit`;
-        if (!documentId) {
-          logger.error("synthesizeCustomScript: copy returned no id");
-          res.status(500).send({error: "Failed to create doc"});
-          return;
-        }
-
-        // 4. Read the freshly-copied template's text so Gemini sees
-        //    the exact placeholders it needs to fill.
-        const tmplExport = await drive.files.export({
-          fileId: documentId,
-          mimeType: "text/plain",
-        }, {responseType: "text"});
-        const templateText = String(tmplExport.data);
-
-        // 5. Gemini fill pass. Single round-trip — model returns a
-        //    JSON map { placeholder: filledText }. We then
-        //    batchUpdate each [PLACEHOLDER] in the Doc. Inline
-        //    construction matches the pattern at cleanVariable
-        //    (index.ts line ~1716): `new GoogleGenerativeAI(
-        //    requireEnv("GEMINI_KEY"))` — no shared helper.
-        const gemini = new GoogleGenerativeAI(requireEnv("GEMINI_KEY"));
-        const model = gemini.getGenerativeModel({
-          model: "gemini-2.5-pro",
-          generationConfig: {
-            temperature: 0.4,
-            responseMimeType: "application/json",
-          },
-        });
-        const prompt = buildSynthesizeCustomScriptPrompt(
-          procedureText, templateText, frameworkText, framework
-        );
-        const result = await model.generateContent(prompt);
-        const raw = result.response.text();
-        const replacements = JSON.parse(raw) as Record<string, string>;
-
-        // 6. batchUpdate replaceAllText for each [PLACEHOLDER].
-        const docs = getDocsClient();
-        const requests = Object.entries(replacements).map(([key, value]) => ({
-          replaceAllText: {
-            containsText: {text: `[${key}]`, matchCase: true},
-            replaceText: value,
-          },
-        }));
-        if (requests.length > 0) {
-          await docs.documents.batchUpdate({
-            documentId,
-            requestBody: {requests},
-          });
-        }
-
-        // 7. (Optional) Share with therapist as Editor.
-        if (body.therapistEmail) {
-          await drive.permissions.create({
-            fileId: documentId,
-            requestBody: {role: "writer", type: "user",
-              emailAddress: body.therapistEmail.trim()},
-            sendNotificationEmail: true,
-          });
-        }
-
-        res.status(200).send({documentId, documentUrl});
-      } catch (error) {
-        logger.error("synthesizeCustomScript error:", error);
-        res.status(500).send({error: "Synthesis failed"});
-      }
+  export function readOrMintWorkspaceToken(): string {
+    try {
+      const existing = window.localStorage.getItem(STORAGE_KEY);
+      if (existing && existing.length >= 6) return existing;
+      const fresh = mintToken();
+      window.localStorage.setItem(STORAGE_KEY, fresh);
+      return fresh;
+    } catch {
+      // Private mode / blocked storage: fall through to ephemeral token.
+      return mintToken();
     }
-  );
-
-  function buildSynthesizeCustomScriptPrompt(
-    procedureText: string,
-    templateText: string,
-    frameworkText: string,
-    frameworkName: string,
-  ): string {
-    return `
-  You are adapting Samwise to a new therapeutic framework.
-
-  STEP-BY-STEP PROCEDURE (read first; this defines canon vs swappable):
-  ${procedureText}
-
-  TARGET FRAMEWORK (read second; this is what we are adapting TO):
-  Framework name: ${frameworkName}
-  Framework material (full text):
-  ${frameworkText}
-
-  TEMPLATE TO FILL (read third; every [PLACEHOLDER_LIKE_THIS] needs a value):
-  ${templateText}
-
-  TASK:
-  Produce a JSON object mapping every [PLACEHOLDER] in the template to its
-  filled value. Only fill PLACEHOLDERS in [SQUARE_BRACKETS]; do NOT touch
-  {{double_curly_braces}} — those are runtime variable slots, not synthesis
-  placeholders.
-
-  Placeholders are named [ROLE_<STRUCTURAL_ROLE>_AT_<SAMWISE_SLOT>]. A single
-  framework component MAY fill multiple placeholders (e.g. CPT Worksheets fill
-  both [ROLE_COGNITIVE_INTERVENTION_AT_PHASE_8] and
-  [ROLE_COGNITIVE_INTERVENTION_AT_OPTIMIZATION] — same mechanism, different
-  formatting per slot). Per the procedure's §2 placement rubric, think across
-  the WHOLE funnel: a framework's components may land at different sections
-  (Qualification / Demo / Onboarding / Possible Origins / Daily ritual) — not
-  all of them belong at Phase 8.
-
-  HARD CONSTRAINTS (from procedure §5):
-  - Keep the 4-beat call structure intact.
-  - Keep every mandatory beat (Phase 1.5, Phase 5b 9-step, etc.).
-  - NEVER write "paciente", "comportamiento autodestructivo", "recaída", or
-    "terapia" into spoken text — use the framework's own vocabulary instead.
-  - Preserve every {{variable}} slot exactly as written.
-
-  Return ONLY a JSON object of the shape:
-    { "PLACEHOLDER_NAME": "filled text", ... }
-  No prose, no markdown, no preamble.
-  `.trim();
   }
   ```
-- **Explanation:** A single self-contained HTTP function that mirrors `createRitualDoc`'s lifecycle (copy → fill → return). Memory bumped to `1GiB` and timeout to `540s` because Gemini-2.5-pro on a long procedure + framework text can take 30–90s. Cold-start tradeoff is acceptable — this is a per-therapist one-shot, not a hot path.
+- **Explanation:** mirrors `/trip`'s pattern verbatim per the skill. The token doubles as the user identifier for `users/{userID}` once the ritual is sealed (no separate auth).
 
-**Step C.3 — Add env vars**
+#### Step A.2 — extend `lib/ritual-doc/schema.ts`
 
-- **Where:** `samwise-backend/cloud-functions/.env` (NEVER committed) — or `firebase functions:secrets:set` depending on which storage cloud-functions currently uses for `RITUAL_TEMPLATE_DOC_ID` etc. **Verify which** before adding.
-- **Action:**
+- **In-file location:** `samwise-app/lib/ritual-doc/schema.ts`
+- **Should not be modified:** existing `TAB_KEYS`, `TAB_LABELS`, `SUBSECTIONS`, `TAB_TEMPLATES`, `emptyTabs`, `isTabKey`, `RitualDoc.tabs`, `Tab` — those drive the existing editor.
+- **Code (append new exports):**
+  ```ts
+  // ── Onboarding extensions (added 2026-06-29 for inverted onboarding) ──
+  //
+  // NO structured Metadata/Qualification/Schedule types — all captured
+  // content lives as Tiptap text under H2 subsections of the existing
+  // tabs (per the no-forms direction). The only new persistent fields
+  // on a ritualDoc are workspace ownership + the sealed marker. The
+  // voice ID table also lives here because both the inline pill toggle
+  // (samwise-app) AND the cloud function need to derive voiceID from
+  // (language, gender).
+
+  export type Gender = 'male' | 'female';
+
+  // Voice ID per (language, gender) — sourced from
+  // samwise-backend/ritual-agent/src/config/voiceIds.ts (English Male
+  // = qualification flow's en voice; Spanish Male = qualification flow's
+  // es voice; Spanish Female = Adriana; English Female = Calypso).
+  // Hand-synced — when voiceIds.ts changes, mirror here AND in the
+  // cloud function (registerRitualFromTiptap.ts).
+  export const VOICE_ID_BY_LANG_GENDER: Record<'en' | 'es', Record<Gender, string>> = {
+    en: {
+      male:   '5ee9feff-1265-424a-9d7f-8e4d431a12c7',
+      female: '03496517-369a-4db1-8236-3d3ae459ddf7',
+    },
+    es: {
+      male:   '13ff5deb-2591-42ad-a356-63a04e524411',
+      female: 'f4d6bb07-f876-4464-ba70-cd48d8701890',
+    },
+  };
+
+  // The extended Metadata subsection list (used by both modes via
+  // SUBSECTIONS['metadata']). Onboarding mode hides userID + voiceID;
+  // full mode shows all. Subsections are seeded as empty H2+paragraph
+  // pairs in TAB_TEMPLATES.
+  export const METADATA_SUBSECTIONS_EXTENDED = [
+    'Name',
+    'Language',
+    'Voice',
+    'Phone number',
+    'Timezone',
+    "Behaviour I'd like to change",
+    'Core motivation',
+    'Call schedule',
+    'userID',     // hidden in onboarding mode
+    'voiceID',    // hidden in onboarding mode
+  ] as const;
+
+  // Extends the existing RitualDoc with workspace ownership + seal state.
+  // Backwards-compatible: existing docs simply don't have these fields.
+  export type RitualDocExtended = RitualDoc & {
+    workspaceToken?: string;
+    sealedAt?: Date;
+    sealedRitualId?: string;   // points at rituals/{id} once sealed
+  };
   ```
-  SAMWISE_PROCEDURE_DOC_ID=<from Phase A.3>
-  SAMWISE_TEMPLATE_DOC_ID=<from Phase B.3>
-  SAMWISE_CUSTOM_PARENT_FOLDER_ID=<from Phase B.4>
+- **Also modify the existing `SUBSECTIONS.metadata` constant** (in the same file) to use `METADATA_SUBSECTIONS_EXTENDED` so the seeded template carries the new subsections from day one. This is a backwards-incompatible change to the seeded shape, but:
+  - existing test ritualDocs from this session are not user data, can be discarded
+  - `getRitualDoc`'s defensive fill-missing-keys logic ensures any older docs that don't have the new subsections won't crash the editor — the seed just adds them on next save
+- **Explanation:** no structured separate-field state. Everything is Tiptap. The two non-Tiptap touchpoints (workspaceToken, sealedAt) are persistence concerns the user never sees, set programmatically.
+
+#### Step A.3 — extend `lib/ritual-doc/storage.ts`
+
+- **In-file location:** `samwise-app/lib/ritual-doc/storage.ts`
+- **Should not be modified:** `COLLECTION`, `createRitualDoc`, `getRitualDoc`, `saveTab` — preserved verbatim.
+- **Code (append):**
+  ```ts
+  // Creates a ritualDoc tied to a workspace token. Idempotent: if the
+  // workspace already has an UNSEALED ritualDoc, returns its id instead
+  // of minting a new one. (Sealed docs do NOT count — a returning user
+  // with a sealed ritual mints a fresh doc for their second ritual.)
+  export async function createRitualDocForWorkspace(
+    workspaceToken: string,
+    language: 'en' | 'es' = 'en',
+  ): Promise<{ id: string; created: boolean }> {
+    const db = getDb();
+
+    // Look for an unsealed doc owned by this token. Requires composite
+    // index (workspaceToken ASC, sealedAt ASC) — accept the requirement
+    // per user direction 2026-06-29.
+    const existing = await db
+      .collection(COLLECTION)
+      .where('workspaceToken', '==', workspaceToken)
+      .where('sealedAt', '==', null)
+      .limit(1)
+      .get();
+    if (!existing.empty) {
+      return { id: existing.docs[0].id, created: false };
+    }
+
+    const now = Timestamp.now();
+    const ref = await db.collection(COLLECTION).add({
+      createdAt: now,
+      updatedAt: now,
+      language,
+      workspaceToken,
+      sealedAt: null,
+      tabs: Object.fromEntries(
+        TAB_KEYS.map((k) => [k, { tiptap: TAB_TEMPLATES[k], updatedAt: now }]),
+      ),
+    });
+    return { id: ref.id, created: true };
+  }
+
+  // Called by registerRitualFromTiptap CF after a successful seal.
+  // Not invoked from samwise-app directly.
+  export async function markSealed(id: string, sealedRitualId: string): Promise<void> {
+    const now = Timestamp.now();
+    await getDb().collection(COLLECTION).doc(id).update({
+      sealedAt: now,
+      sealedRitualId,
+      updatedAt: now,
+    });
+  }
   ```
+- **Explanation:** content saves still flow through the existing `saveTab` helper — the user's typing in any Tiptap subsection goes through autosave like today. No new per-field setters needed (no structured fields exist). `createRitualDocForWorkspace` is idempotent so refreshing `/start` doesn't mint duplicate docs.
+- **Firestore composite index:** `(workspaceToken ASC, sealedAt ASC)` on `ritualDocs`. Add to `firestore.indexes.json` (or equivalent deploy artifact) — Firebase will print a one-click create-link in logs the first time the query runs if missing.
 
-**Step C.4 — Deploy**
+### Phase B — `/start` route
 
-- **Command:** `cd samwise-backend/cloud-functions && firebase deploy --only functions:synthesizeCustomScript`
-- **Verify:** the deploy log shows the new function URL. Capture it for Step D.1's `SYNTH_URL` constant.
+#### Step B.1 — `app/start/page.tsx`
 
-### Phase D — `BuildCustomScriptCard` + sidebar wiring
-
-**Step D.1 — Create `components/build-custom-script-card.tsx`**
-
-- **In-file location:** new file `samwise-app/components/build-custom-script-card.tsx`.
-- **Should NOT be modified:** `components/register-ritual-card.tsx`. Read it for the shape; do NOT extract a shared helper — duplication is fine at v0.
+- **In-file location:** new file at `samwise-app/app/start/page.tsx`
+- **Should not be modified:** N/A
 - **Code:**
   ```tsx
-  "use client"
+  'use client';
 
-  import { useState, useEffect } from "react"
-  import {
-    FieldGroup,
-    Field,
-    FieldLabel,
-    FieldDescription,
-  } from "@/components/ui/field"
-  import { Input } from "@/components/ui/input"
-  import { Textarea } from "@/components/ui/textarea"
-  import { Button } from "@/components/ui/button"
-  import { Spinner } from "@/components/ui/spinner"
+  import { useEffect, useRef, useState } from 'react';
+  import { useRouter, useSearchParams } from 'next/navigation';
+  import { readOrMintWorkspaceToken } from '@/lib/workspace-token';
 
-  const SYNTH_URL =
-    "https://synthesizecustomscript-b6fhjlgejq-uc.a.run.app"  // confirm after deploy
-  const LAST_DOC_KEY = "custom-script:last-doc"
-
-  type InputMode = "pdf" | "url" | "text"
-
-  export function BuildCustomScriptCard() {
-    const [mode, setMode] = useState<InputMode>("text")
-    const [text, setText] = useState("")
-    const [url, setUrl] = useState("")
-    const [pdfBase64, setPdfBase64] = useState<string | null>(null)
-    const [therapistName, setTherapistName] = useState("")
-    const [therapistEmail, setTherapistEmail] = useState("")
-    const [frameworkName, setFrameworkName] = useState("")
-    const [loading, setLoading] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-    const [resultUrl, setResultUrl] = useState<string | null>(null)
-    const [hydrateUrl, setHydrateUrl] = useState("")
+  // Bootstrap route — the destination of landing's "Start Now" CTA.
+  // Mints (or reads) a workspace token, ensures a ritualDoc exists for
+  // it, then replaces the URL with the editor's onboarding mode. ?from=
+  // transition is passed through so the editor's first paint can fade
+  // in (masks the cross-origin white flash from samwise.life).
+  export default function StartPage() {
+    const router = useRouter();
+    const params = useSearchParams();
+    const fromTransition = params.get('from') === 'transition';
+    const inFlightRef = useRef(false);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-      const cached = localStorage.getItem(LAST_DOC_KEY)
-      if (cached) setResultUrl(cached)
-    }, [])
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
 
-    async function handlePdfChange(e: React.ChangeEvent<HTMLInputElement>) {
-      const f = e.target.files?.[0]
-      if (!f) return
-      const buf = await f.arrayBuffer()
-      const b64 = btoa(
-        new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), "")
-      )
-      setPdfBase64(b64)
-    }
-
-    async function handleSubmit() {
-      setLoading(true); setError(null)
-      try {
-        const body: Record<string, unknown> = {
-          inputMode: mode,
-          therapistName: therapistName || undefined,
-          therapistEmail: therapistEmail || undefined,
-          frameworkName: frameworkName || undefined,
+      (async () => {
+        try {
+          const token = readOrMintWorkspaceToken();
+          const res = await fetch('/api/ritual-doc/create-for-workspace', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const { id } = (await res.json()) as { id: string };
+          const url = `/ritual-doc/${id}?mode=onboarding${fromTransition ? '&from=transition' : ''}`;
+          router.replace(url);
+        } catch (err) {
+          console.error('start bootstrap failed:', err);
+          setError(err instanceof Error ? err.message : 'Unknown error.');
         }
-        if (mode === "pdf")  body.pdfBase64 = pdfBase64
-        if (mode === "url")  body.url = url
-        if (mode === "text") body.text = text
-        const r = await fetch(SYNTH_URL, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(body),
-        })
-        if (!r.ok) throw new Error(`Synthesis failed: ${r.status}`)
-        const j = await r.json() as {documentUrl: string}
-        setResultUrl(j.documentUrl)
-        localStorage.setItem(LAST_DOC_KEY, j.documentUrl)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Unknown error")
-      } finally { setLoading(false) }
-    }
-
-    function handleHydrate() {
-      if (!hydrateUrl.trim()) return
-      localStorage.setItem(LAST_DOC_KEY, hydrateUrl.trim())
-      setResultUrl(hydrateUrl.trim())
-    }
+      })();
+    }, [router, fromTransition]);
 
     return (
-      <div className="max-w-2xl space-y-8">
-        <FieldGroup>
-          <Field>
-            <FieldLabel>Framework name (optional)</FieldLabel>
-            <Input value={frameworkName} onChange={e => setFrameworkName(e.target.value)} placeholder="CPT, ITAA 12-steps, …" />
-          </Field>
-          <Field>
-            <FieldLabel>Therapist name (optional)</FieldLabel>
-            <Input value={therapistName} onChange={e => setTherapistName(e.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel>Therapist email (optional — shares the Doc as Editor)</FieldLabel>
-            <Input type="email" value={therapistEmail} onChange={e => setTherapistEmail(e.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel>Input mode</FieldLabel>
-            <div className="flex gap-3">
-              {(["text","url","pdf"] as InputMode[]).map(m => (
-                <label key={m} className="flex items-center gap-2 text-sm">
-                  <input type="radio" checked={mode===m} onChange={() => setMode(m)} />
-                  {m.toUpperCase()}
-                </label>
-              ))}
-            </div>
-          </Field>
-          {mode === "text" && (
-            <Field>
-              <FieldLabel>Paste your framework material</FieldLabel>
-              <Textarea rows={10} value={text} onChange={e => setText(e.target.value)} />
-            </Field>
-          )}
-          {mode === "url" && (
-            <Field>
-              <FieldLabel>URL of your framework material</FieldLabel>
-              <Input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" />
-            </Field>
-          )}
-          {mode === "pdf" && (
-            <Field>
-              <FieldLabel>Upload PDF</FieldLabel>
-              <Input type="file" accept="application/pdf" onChange={handlePdfChange} />
-            </Field>
-          )}
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Spinner /> : "Build custom samwise script"}
-          </Button>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </FieldGroup>
-
-        {resultUrl && (
-          <FieldGroup>
-            <Field>
-              <FieldLabel>Your custom samwise script Doc</FieldLabel>
-              <FieldDescription>
-                Click to open in Google Docs. Edit freely; the link is cached locally so you can return to it.
-              </FieldDescription>
-              <a href={resultUrl} target="_blank" rel="noreferrer" className="text-primary underline break-all">{resultUrl}</a>
-            </Field>
-          </FieldGroup>
+      <div className="brand-editorial flex min-h-screen items-center justify-center bg-background text-foreground">
+        {error ? (
+          <div className="max-w-md text-center">
+            <p className="mb-2 text-sm text-destructive">Could not start your ritual.</p>
+            <p className="text-xs text-muted-foreground">{error}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Preparing your ritual…</p>
         )}
-
-        <FieldGroup>
-          <Field>
-            <FieldLabel>Continue from an existing Doc</FieldLabel>
-            <FieldDescription>
-              Paste the URL of a previously-generated custom samwise Doc to re-hydrate it here.
-            </FieldDescription>
-            <Input value={hydrateUrl} onChange={e => setHydrateUrl(e.target.value)} placeholder="https://docs.google.com/document/d/…" />
-            <Button variant="ghost" onClick={handleHydrate}>Load</Button>
-          </Field>
-        </FieldGroup>
       </div>
-    )
+    );
   }
   ```
-- **Explanation:** Self-contained, no props. Mirrors `RegisterRitualCard`'s shape: `FieldGroup` / `Field` / `Input` / `Button`, no `<Card>` wrapper. PDF upload reads to a base64 string client-side (cap PDF size to ~5 MB at the upload UI in a hardening pass; v0 trusts the user). Hydration is local-only — the Doc URL is treated as the artifact identifier, no Drive read needed at this surface. The "Load" button stores it to localStorage so the next mount sees it.
+- **Explanation:** mirrors `/trip/page.tsx` shape. `inFlightRef` is the per-component equivalent of the single-flight Promise memo the trip skill specifies — prevents double-create if React StrictMode runs the effect twice.
 
-**Step D.2 — Wire the sidebar item in `app/for-experts/page.tsx`**
+#### Step B.2 — `app/api/ritual-doc/create-for-workspace/route.ts`
 
-- **In-file location:** `samwise-app/app/for-experts/page.tsx`, FOUR coupled edits:
-- **Should NOT be modified:** the entire copilot path (URL gate, `copilotLoaded` derivation, `<CopilotSurface>` mount, all qualify / onboarding wiring), the Register Ritual path, the layout shell, the brand header. Only the four edits below land.
-- **Edits:**
-  ```tsx
-  // (1) Top of file, alongside the other component imports:
-  import { BuildCustomScriptCard } from "@/components/build-custom-script-card"
+- **In-file location:** new file at `samwise-app/app/api/ritual-doc/create-for-workspace/route.ts`
+- **Code:**
+  ```ts
+  import { NextResponse } from 'next/server';
+  import { z } from 'zod';
+  import { createRitualDocForWorkspace } from '@/lib/ritual-doc/storage';
 
-  // (2) Replace the ExpertView union at line 60:
-  type ExpertView = "copilot" | "register" | "build-custom"
+  export const runtime = 'nodejs';
 
-  // (3) Inside the <SidebarMenu>, after the "Register Ritual"
-  //     SidebarMenuItem (after line ~183):
-  <SidebarMenuItem>
-    <SidebarMenuButton
-      isActive={view === "build-custom"}
-      onClick={() => setView("build-custom")}
-      tooltip="Build custom samwise script"
-    >
-      <span>Build custom samwise</span>
-    </SidebarMenuButton>
-  </SidebarMenuItem>
+  const Body = z.object({
+    token: z.string().min(6).max(64),
+    language: z.enum(['en', 'es']).optional(),
+  });
 
-  // (4) In the render block, after the line
-  //     `{view === "register" && <RegisterRitualCard />}` (line ~273):
-  {view === "build-custom" && <BuildCustomScriptCard />}
-
-  // (5) In the header h1 label resolver (around line ~199, currently a
-  //     ternary like `view === "copilot" ? "Copilot for behavioural experts" : "Register Ritual"`),
-  //     extend to:
-  //       view === "copilot"  ? "Copilot for behavioural experts"
-  //     : view === "register" ? "Register Ritual"
-  //     : "Build custom samwise"
+  export async function POST(req: Request) {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const parsed = Body.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+    }
+    try {
+      const { id, created } = await createRitualDocForWorkspace(parsed.data.token, parsed.data.language ?? 'en');
+      // Best-effort Samuel notification on a NEW doc creation only —
+      // don't spam on idempotent returns. Mirrors notifySamuelOfQualifyStart
+      // / notifySamuelOfBooking pattern. Awaited before route returns
+      // because un-awaited fetches get dropped in Vercel's serverless
+      // runtime (per memory `reference_landing_no_firestore_admin_notify`).
+      if (created) {
+        try {
+          const { notifySamuelOfOnboardingStart } = await import('@/lib/notify/samuel');
+          await notifySamuelOfOnboardingStart({ ritualDocId: id, workspaceToken: parsed.data.token });
+        } catch (err) {
+          console.warn('notifySamuelOfOnboardingStart failed (non-blocking):', err);
+        }
+      }
+      return NextResponse.json({ id });
+    } catch (err) {
+      console.error('createRitualDocForWorkspace failed:', err);
+      return NextResponse.json({ error: 'Create failed' }, { status: 500 });
+    }
+  }
   ```
-- **Explanation:** Pure additions in the existing view-state machine. No URL change, no route added. The new view is one click away from Copilot — when the therapist has built their script, they switch back to Copilot, paste the new Doc URL into the existing gate, and the existing `loadCallScript` flow handles it.
+- **Sibling work** in `samwise-app/lib/notify/samuel.ts`: add `notifySamuelOfOnboardingStart({ ritualDocId, workspaceToken })` — same shape as the existing `notifySamuelOfQualifyStart` / `notifySamuelOfBooking`. Subject: "A new ritual is being designed." Body: a link to `/ritual-doc/{ritualDocId}` so Samuel can open it in admin/full-mode and parallel-guide the user on a call.
 
-**Step D.3 (optional, can ship in a follow-up) — "Load into Copilot" affordance**
+### Phase C — Onboarding mode in the editor
 
-- Add a `<Button onClick={() => { /* setView('copilot'); seed URL gate */ }}>Load into Copilot</Button>` inside the `resultUrl` `FieldGroup`. Requires lifting `setView` + a one-shot URL seed prop into `BuildCustomScriptCard` (or via a tiny context). **Skip in v0** — paste-into-gate works fine.
+#### Step C.1 — `lib/ritual-doc/onboarding-mode.ts`
 
-### Phase E — Voice-refine flow (DEFERRED — outline only)
+- **In-file location:** new file at `samwise-app/lib/ritual-doc/onboarding-mode.ts`
+- **Code:**
+  ```ts
+  import type { TabKey } from './schema';
 
-A new sibling flow `flows/custom-script-design/` in `samwise-backend/ritual-agent/`, mirroring `flows/ritual-design/`. The therapist talks to the agent, the agent reads the just-generated custom script Doc, and the therapist refines specific phases conversationally. Same Aragorn persona, same `readGoogleDoc` / `writeToDocTab` infra (per the `ritual-design-prompt` skill). Surface in samwise-app: a "Refine via voice" button on `BuildCustomScriptCard` once `resultUrl` is set.
+  // Subset of tabs visible during onboarding mode. Order matters — it's
+  // the order of the step-progress strip. Metadata first (the user fills
+  // identity + the trimmed qualification subsections + schedule), then
+  // the two content tabs.
+  export const ONBOARDING_TAB_KEYS: readonly TabKey[] = [
+    'metadata',
+    'ritualCall',
+    'ritual',
+  ];
 
-**Not in scope for this task.** Documented here so the architecture stays consistent.
+  // Per tab, the H2 subsection titles visible in onboarding mode. Any
+  // H2 NOT in the list (within that tab) is hidden from the editor's
+  // view. Hidden subsections are preserved in the saved doc — they
+  // sit as empty scaffolding for the user's later optimization moments
+  // (per user direction 2026-06-29: "keep them in the doc").
+  export const ONBOARDING_VISIBLE_SUBSECTIONS: Partial<Record<TabKey, readonly string[]>> = {
+    metadata: [
+      'Name',
+      'Language',
+      'Voice',
+      'Phone number',
+      'Timezone',
+      "Behaviour I'd like to change",
+      'Core motivation',
+      'Call schedule',
+      // userID + voiceID are hidden in onboarding mode (technical)
+    ],
+    ritualCall: [
+      // Full set — all 4 beats visible in onboarding
+      'Exit from the day',
+      'Entry into the work',
+      'Intentions',
+      'The pact',
+    ],
+    ritual: [
+      'Mantras de desidentificación',
+      'Generación de bloqueador — ¿Siento que se viene un ataque?',
+      // hidden: Mantras de esperanza, Helpers, Procedure, Construcción
+      // de nueva fe — actividad diaria, Surrender, second Procedure,
+      // Schedules
+    ],
+  };
 
-### Phase F — Quick fit test + first-class `[TYPE: custom]` config (DEFERRED — outline only)
+  // Strict typed format the Call schedule subsection's paragraphs are
+  // SEEDED with — the user OVERWRITES the times. The CF parses these
+  // with a strict regex (24h HH:MM). Per user direction 2026-06-29 (no
+  // forms): teach the convention via the placeholder template rather
+  // than via a time-picker widget.
+  export const CALL_SCHEDULE_TEMPLATE = [
+    'Morning — 06:30',
+    'Evening — 20:00',
+  ] as const;
 
-A `/for-experts/custom-script-test` sub-view (or a fourth sidebar item) that loads the therapist's custom script into a sandbox copilot with a simulated patient (LLM plays the patient end-to-end) so the therapist can feel the call without recruiting. ALSO: add `custom` to the `configForScriptType()` router in `app/for-experts/page.tsx` so `[TYPE: custom]` scripts get their own variable config + UI instead of falling through to demo.
+  export function isOnboardingMode(searchParams: URLSearchParams | null | undefined): boolean {
+    return searchParams?.get('mode') === 'onboarding';
+  }
+  ```
 
-**Not in scope for this task.**
+#### Step C.2 — `app/ritual-doc/[id]/page.tsx`
 
-## Testing phase
+- **In-file location:** `samwise-app/app/ritual-doc/[id]/page.tsx`
+- **Should not be modified:** the existing `getRitualDoc` call + `notFound()` + `metadata` export.
+- **Code (extend the props passed to RitualDocEditor):**
+  ```tsx
+  // pass searchParams.mode through so the client component branches
+  export default async function Page({
+    params,
+    searchParams,
+  }: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<{ mode?: string; sealed?: string; from?: string }>;
+  }) {
+    const { id } = await params;
+    const sp = await searchParams;
+    const doc = await getRitualDoc(id);
+    if (!doc) notFound();
+    const serializable = { /* …existing serialization… */ };
+    return (
+      <RitualDocEditor
+        id={id}
+        initial={serializable as never}
+        mode={sp.mode === 'onboarding' ? 'onboarding' : 'normal'}
+        sealed={sp.sealed === '1'}
+        fromTransition={sp.from === 'transition'}
+      />
+    );
+  }
+  ```
 
-### Local test
+#### Step C.3 — `app/ritual-doc/[id]/RitualDocEditor.tsx`
 
-- **Phase A:** Doc is reviewable in Google Docs. No code to run.
-- **Phase B:** Worked example Doc + template Doc are reviewable. No code to run.
-- **Phase C:**
-  - `cd samwise-backend/cloud-functions/functions && pnpm tsc --noEmit` — type-check.
-  - `pnpm lint` — lint clean.
-  - `firebase emulators:start --only functions` — start emulator.
-  - Hit the local emulator URL with `curl` (text mode, short payload) — verify it returns `{ documentId, documentUrl }` and that the resulting Doc has every `[PLACEHOLDER]` substituted (open in Google Docs, Ctrl+F for `[` — should find only `[SAY]`/`[/SAY]`/`[END]`/`[TYPE: ...]`/`[VERSION: ...]` markers).
-- **Phase D:**
-  - `cd samwise-app && pnpm dev` — start dev server.
-  - Open `http://localhost:3000/for-experts` → sidebar "Build custom samwise" → fill text mode with ~500 words of CPT material → Submit → verify Doc URL appears.
-  - Hard-reload → URL is still visible (localStorage hydration works).
-  - Paste a different Doc URL into "Continue from existing Doc" → click Load → verify `resultUrl` swaps.
+- **In-file location:** `samwise-app/app/ritual-doc/[id]/RitualDocEditor.tsx`
+- **Should not be modified:** the existing nav extraction, ImmerseToggle, beat-in animation wrapper, fullscreen state machine.
+- **Action:** extend with three branches:
+  1. When `mode === 'onboarding'`:
+     - Replace `NAV` with the 3-item subset (Metadata · Ritual Call · Ritual).
+     - Render `<OnboardingProgressStrip>` above the editor.
+     - For EVERY tab in onboarding mode, pass `visibleH2s={ONBOARDING_VISIBLE_SUBSECTIONS[active]}` to `<EditorPane>` — the existing EditorPane filters its initial content to only the visible H2s (see Step C.4). The Metadata tab uses this mechanism too — it's still an `<EditorPane>`, just one with a filtered set of visible subsections.
+     - On the Metadata tab specifically, render the inline `<VoicePillToggle>` above the editor (positioned right after the tab heading) — see Step C.5.
+     - Render `<OnboardingSealButton>` below the editor when the active tab is Ritual.
+  2. When `mode === 'onboarding' && sealed`, render `<OnboardingSuccessScreen>` full-bleed instead of the editor.
+  3. When `fromTransition`, wrap the whole shell in a brief opacity fade-in (`useState` initially 0 → 1 on mount with 400ms transition).
+- The existing full-editor path (no `?mode=`) is unchanged.
 
-### Integration test
+#### Step C.4 — `app/ritual-doc/[id]/EditorPane.tsx`
 
-- Deploy `synthesizeCustomScript` to the production Firebase project.
-- Update `SYNTH_URL` in `build-custom-script-card.tsx` to the deployed URL.
-- From localhost samwise-app, submit a real PDF (e.g. an ITAA 12-step pamphlet) → verify the resulting Doc renders in Google Docs with: the framework's vocabulary present in spoken text, Samwise canon vocabulary preserved, vocabulary blacklist respected (Ctrl+F for `paciente` / `recaída` / `comportamiento autodestructivo` / `terapia` inside `[SAY]…[/SAY]` blocks — must return 0 hits).
-- Switch back to "Copilot" view → paste the new Doc URL into the gate → `loadCallScript` returns the parsed shape → renders in script-pane without errors. (Variable substitution may be sparse since the custom script's `{{variables}}` may not be in `demo-call-config.ts` — acceptable for v0.)
+- **In-file location:** `samwise-app/app/ritual-doc/[id]/EditorPane.tsx`
+- **Should not be modified:** the existing autosave, AbortController LIFO, prose classes, key={active} remount.
+- **Action:** add an optional prop `visibleH2s?: readonly string[]`. Behaviour when provided:
+  1. **On mount:** split the `initialContent` tiptap doc into two parts:
+     - `visibleContent` — the H2 nodes whose text matches one of `visibleH2s`, plus their following nodes up to the next H2. This is what mounts in the editor.
+     - `hiddenContent` — a Map<h2-text, JSONContent[]> of the OTHER H2s and their runs. Held in a ref; NOT shown to the user. Sourced from `initialContent` at mount time only.
+  2. **On every `onUpdate` / autosave:** before calling `saveTab`, merge the editor's current JSON BACK INTO the original full document by rebuilding it in the original H2 order: walk the original H2 sequence, for each visible H2 take the edited content from the editor's current state, for each hidden H2 take the stashed content from `hiddenContent`. Save the merged result.
+- **Why:** preserves the user's explicit instruction "keep them in the doc as empty scaffolding". If the hidden subsections were stripped on save, the full editor's later view would show only the visible 2 H2s — breaking the user's "more to shape later" promise. The merge ensures the saved doc always carries the full structure.
+- **Edge case (accepted):** if a future agent or admin tool writes content into a hidden subsection WHILE the user is in onboarding mode, that content gets overwritten by the empty stash on the next save. Acceptable for v1 since no such writer exists today.
+- **Implementation note:** pure JSONContent transforms, no ProseMirror plugin needed. The split-and-merge happens in JavaScript outside the editor's state. Tiptap's editor sees only the filtered visible content.
 
-### Update README
+#### Step C.5 — `VoicePillToggle.tsx`
 
-- **samwise-backend/cloud-functions/functions/src/index.ts:** add `synthesizeCustomScript` to the top-of-file function index comment (line ~53).
-- **samwise-app:** no README update (the app doesn't have a feature-list README).
+- **In-file location:** new file at `samwise-app/app/ritual-doc/[id]/VoicePillToggle.tsx`
+- **Purpose:** the ONE non-Tiptap UI element in onboarding mode. A tiny two-pill toggle (Male | Female) rendered above the editor on the Metadata tab. Click sets the paragraph immediately after the "Voice" H2 to "male" or "female" via Tiptap editor commands. The cloud function regex-reads this paragraph at seal time.
+- **Code:**
+  ```tsx
+  'use client';
 
-## After implementation
+  import type { Editor } from '@tiptap/react';
 
-- Update `samwise-app/context-for-code-agent.md`:
-  - Add `/for-experts` "Build custom samwise" view to the route description.
-  - Note the new `BuildCustomScriptCard` component.
-  - Note the new cloud function `synthesizeCustomScript` and its three env vars.
-  - Note the localStorage key `custom-script:last-doc`.
-- Update `samwise-backend/cloud-functions/functions/src/index.ts`'s top-of-file comment to include `synthesizeCustomScript` in the function list.
-- (Manual user step) Mark the task DONE → FINISHED in the master Vibe doc Projects tab once Phases A–D ship. Phases E–F either remain IN PROGRESS as separate task entries or get spun off as new tasks.
-- (Skill update) Append a section to the `samwise-session-copilot` skill describing the "Build custom samwise" view and the `[TYPE: custom]` script-type fall-through behaviour. Add a new skill (or section in `samwise-script-work`) describing the **Samwise Adaptation Procedure Doc** as the source of truth for "what is canon."
+  // Inline pill toggle for the Voice subsection. The current value is
+  // read from the Tiptap doc (the paragraph after the "Voice" H2), so
+  // there's no separate state — the editor IS the source of truth.
+  //
+  // On click, sets that paragraph's content to 'male' or 'female' via
+  // editor.commands. Autosave picks it up like any other edit.
+  export function VoicePillToggle({ editor }: { editor: Editor | null }) {
+    if (!editor) return null;
+
+    const currentValue = readVoiceValue(editor);
+    const setValue = (value: 'male' | 'female') => writeVoiceValue(editor, value);
+
+    return (
+      <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+        <span>Voice:</span>
+        <Pill active={currentValue === 'male'} onClick={() => setValue('male')}>Male</Pill>
+        <Pill active={currentValue === 'female'} onClick={() => setValue('female')}>Female</Pill>
+      </div>
+    );
+  }
+
+  function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+          active
+            ? 'border-[var(--accent-gold)] bg-[var(--accent-gold)]/15 text-foreground'
+            : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'
+        }`}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  // Walks the editor's JSON looking for the H2 "Voice" + the paragraph
+  // immediately after; returns the paragraph's text trimmed-lowercased.
+  function readVoiceValue(editor: Editor): 'male' | 'female' | null {
+    const json = editor.getJSON();
+    const content = json.content ?? [];
+    for (let i = 0; i < content.length - 1; i++) {
+      const node = content[i];
+      if (node.type === 'heading' && node.attrs?.level === 2) {
+        const text = (node.content ?? []).map((c) => c.text ?? '').join('').trim();
+        if (text === 'Voice') {
+          const next = content[i + 1];
+          if (next?.type === 'paragraph') {
+            const v = (next.content ?? []).map((c) => c.text ?? '').join('').trim().toLowerCase();
+            if (v === 'male' || v === 'female') return v;
+          }
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Finds the paragraph after the Voice H2 and replaces its content with
+  // the chosen value. Uses editor.commands.insertContentAt with a ranged
+  // delete-replace; falls back to a no-op if the structure is unexpected
+  // (defensive — the H2+paragraph should always be there from the seed).
+  function writeVoiceValue(editor: Editor, value: 'male' | 'female') {
+    // Implementation detail: walk doc positions, find the paragraph
+    // after the Voice H2, replace its text content with the value.
+    // Full code in implementation.
+  }
+  ```
+- **Explanation:** stays inside the editor's state — no separate React state to sync. The click triggers an editor command, the editor's `onUpdate` fires, autosave kicks in. Aesthetic continuity: looks like a small label adornment, not a form widget.
+
+#### Step C.6 — `OnboardingProgressStrip.tsx`
+
+- **In-file location:** new file at `samwise-app/app/ritual-doc/[id]/OnboardingProgressStrip.tsx`
+- **Action:** a slim horizontal bar at the top of the editor (above the tab heading) showing "1 of 3 · Metadata", "2 of 3 · Ritual Call", "3 of 3 · Ritual" depending on the active tab. Hairline gold underline marks active step. Click a step to jump to that tab.
+
+#### Step C.7 — `OnboardingSealButton.tsx`
+
+- **In-file location:** new file at `samwise-app/app/ritual-doc/[id]/OnboardingSealButton.tsx`
+- **Action:** primary CTA "Seal my ritual" at the bottom of the Ritual tab. **Always enabled** — validation is the cloud function's job (returns a structured 400 with the missing field name, button shows the message inline). Rationale: with everything as Tiptap text, client-side "is this filled" detection requires parsing the doc, which the CF will do anyway. Simpler to let the CF be the validator.
+- On click → POST `/api/ritual-doc/[id]/seal` → on success, `router.replace(`/ritual-doc/${id}?mode=onboarding&sealed=1`)` → success screen. On 400, surface the CF's error message ("Missing Phone number in Metadata", etc.) below the button.
+
+#### Step C.8 — `OnboardingSuccessScreen.tsx`
+
+- **In-file location:** new file at `samwise-app/app/ritual-doc/[id]/OnboardingSuccessScreen.tsx`
+- **Action:** centered editorial layout. Fraunces-italic display headline **"Your ritual is alive."** + body line "Your first call is at [firstCallAt]." + a soft "Open it whenever you want to keep shaping." + a CTA "Open my ritual doc" that navigates to `/ritual-doc/[id]` (no query string → full editor).
+
+### Phase D — Sealing API + backend cloud function
+
+#### Step D.1 — `app/api/ritual-doc/[id]/seal/route.ts`
+
+- **In-file location:** new file at `samwise-app/app/api/ritual-doc/[id]/seal/route.ts`
+- **Code:**
+  ```ts
+  import { NextResponse } from 'next/server';
+
+  export const runtime = 'nodejs';
+
+  const REGISTER_RITUAL_FROM_TIPTAP_URL =
+    process.env.REGISTER_RITUAL_FROM_TIPTAP_URL ??
+    'https://registerritualfromtiptap-…-uc.a.run.app'; // fill in post-deploy
+
+  export async function POST(
+    _req: Request,
+    { params }: { params: Promise<{ id: string }> },
+  ) {
+    const { id } = await params;
+    try {
+      const res = await fetch(REGISTER_RITUAL_FROM_TIPTAP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ritualDocId: id }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Seal failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as { ritualId: string; firstCallAt: string };
+      return NextResponse.json(data);
+    } catch (err) {
+      console.error('seal forward failed:', err);
+      return NextResponse.json({ error: err instanceof Error ? err.message : 'Seal failed' }, { status: 500 });
+    }
+  }
+  ```
+
+#### Step D.2 — `lib/ritual-doc/tiptap-to-markdown.ts`
+
+- **In-file location:** new file at `samwise-app/lib/ritual-doc/tiptap-to-markdown.ts`
+- **Action:** small pure function — takes a Tiptap JSONContent doc + the tab's display label → emits Markdown with `# {label}`, `## {h2 text}`, `### {h3 text}`, paragraph text + blank lines. Used both by the seal route (when serializing to send to the cloud function — but the CF re-reads from Firestore, so actually the CF owns the serialization) AND as a utility for debugging.
+- **Decision:** the CF should own the serialization (since it has the source-of-truth Firestore read). This helper can live in samwise-app too for testing, OR live exclusively in the CF. **Recommendation:** put it ONLY in the CF (`samwise-backend/cloud-functions/functions/src/tiptap-to-markdown.ts`). The samwise-app version is removed from this step.
+
+#### Step D.3 — `functions/src/registerRitualFromTiptap.ts` (NEW)
+
+- **In-file location:** new file at `samwise-backend/cloud-functions/functions/src/registerRitualFromTiptap.ts`
+- **Should not be modified:** `index.ts`'s existing `registerNewRitual` — parallel function, no edits to the existing path.
+- **Action:** mirrors `registerNewRitual` closely but reads from Firestore instead of Google Docs. Key sub-pieces:
+  ```ts
+  // Pseudocode shape; full code in implementation
+  export const registerRitualFromTiptap = onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      const { ritualDocId } = req.body as { ritualDocId: string };
+
+      // 1. Read the source ritualDoc
+      const docRef = db.collection('ritualDocs').doc(ritualDocId);
+      const snap = await docRef.get();
+      if (!snap.exists) return res.status(404).send({ error: 'ritualDoc not found' });
+      const ritualDoc = snap.data()!;
+
+      // 2. Serialize ALL 6 tabs from Tiptap → plain text (Markdown).
+      //    Metadata tab is parsed for structured fields below; the 3
+      //    synthesis tabs become the raw material for the prompt.
+      const tabs = ritualDoc.tabs ?? {};
+      const metadataMd     = serializeTiptapToMarkdown(tabs.metadata?.tiptap, 'Metadata');
+      const ritualCallMd   = serializeTiptapToMarkdown(tabs.ritualCall?.tiptap, 'Ritual Call');
+      const ritualMd       = serializeTiptapToMarkdown(tabs.ritual?.tiptap, 'Ritual');
+      const behaviouralMd  = serializeTiptapToMarkdown(tabs.behaviouralPicture?.tiptap, 'Behavioural picture');
+
+      // 3. Regex-extract structured Metadata fields from the Metadata
+      //    tab's Markdown — same approach `registerNewRitual` uses on
+      //    the Google Doc's Metadata tab today. Looks for the paragraph
+      //    immediately after each H2 subsection.
+      const extract = (h2: string) => extractH2Paragraph(metadataMd, h2);
+
+      const name       = extract('Name');
+      const language   = (extract('Language') ?? '').toLowerCase().startsWith('es') ? 'es' : 'en';
+      const voiceWord  = (extract('Voice') ?? '').toLowerCase().trim() as 'male' | 'female';
+      const phone      = extract('Phone number');
+      const timeZone   = extract('Timezone') || 'UTC';
+
+      // Per-field validation — surface specific missing fields so the
+      // Seal button can show a useful error.
+      const missing: string[] = [];
+      if (!name)  missing.push('Name');
+      if (!phone) missing.push('Phone number');
+      if (voiceWord !== 'male' && voiceWord !== 'female') missing.push('Voice');
+      if (missing.length) {
+        return res.status(400).send({ error: `Please fill in: ${missing.join(', ')}` });
+      }
+
+      // Derive voiceID from (language, voice). Table mirrors
+      // samwise-backend/ritual-agent/src/config/voiceIds.ts — hand-synced.
+      const VOICE_ID_BY_LANG_GENDER: Record<'en' | 'es', Record<'male' | 'female', string>> = {
+        en: { male: '5ee9feff-1265-424a-9d7f-8e4d431a12c7', female: '03496517-369a-4db1-8236-3d3ae459ddf7' },
+        es: { male: '13ff5deb-2591-42ad-a356-63a04e524411', female: 'f4d6bb07-f876-4464-ba70-cd48d8701890' },
+      };
+      const voiceID = VOICE_ID_BY_LANG_GENDER[language][voiceWord];
+
+      // userID = workspaceToken (the user's persistent identifier)
+      const userID = ritualDoc.workspaceToken;
+      if (!userID) return res.status(400).send({ error: 'ritualDoc missing workspaceToken' });
+
+      // 4. Build the raw material for the synthesis prompt. Includes
+      //    the trimmed-qualification subsections + schedule subsection
+      //    inline as part of the Metadata Markdown — the synthesis
+      //    prompt's Rule 10 will extract DAY_HH:MM schedules from
+      //    whatever times the user wrote under "Call schedule".
+      const rawMaterial = [
+        metadataMd,
+        '',
+        ritualCallMd,
+        '',
+        ritualMd,
+        '',
+        behaviouralMd,
+        '',
+        `[NOTE: The user wants the call conducted in ${language === 'es' ? 'Spanish' : 'English'}.]`,
+      ].join('\n');
+
+      // 5. Call Gemini with the EXISTING synthesis prompt
+      const prompt = SYNTHESIS_PROMPT.replace('[INSERT RAW USER INPUT HERE]', rawMaterial);
+      const geminiOut = await callGeminiSynthesis(prompt); // same call site as registerNewRitual uses
+
+      // 6. Schedules: parsed by STRICT REGEX from the Call schedule
+      //    subsection's paragraphs (per user direction 2026-06-29 — no
+      //    forms but strict typed convention, more reliable than
+      //    Gemini Rule 10 over prose). The subsection was seeded with
+      //    "Morning — 06:30" / "Evening — 20:00"; the user overwrote
+      //    the times. We pull every paragraph under "Call schedule"
+      //    that matches /(?:Morning|Afternoon|Evening|Night)\s+[—-]\s+(\d{1,2}):(\d{2})/,
+      //    then expand to a weekly schedule (DAY_HH:MM for every day
+      //    of the week). Synthesis's Rule-10-extracted schedules are
+      //    ignored — this path is the source of truth.
+      const scheduleParagraphs = extractH2ParagraphList(metadataMd, 'Call schedule');
+      const parsedTimes = scheduleParagraphs
+        .map((line) => /\b(\d{1,2}):(\d{2})\b/.exec(line))
+        .filter((m): m is RegExpExecArray => m !== null)
+        .map((m) => `${m[1].padStart(2, '0')}:${m[2]}`);
+      if (parsedTimes.length === 0) {
+        return res.status(400).send({
+          error: 'Could not find any call times under "Call schedule". Please write times like "Morning — 06:30" and "Evening — 20:00".',
+        });
+      }
+      const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+      const schedules: string[] = [];
+      for (const day of DAYS) {
+        for (const time of parsedTimes) schedules.push(`${day}_${time}`);
+      }
+
+      // 7. Build RitualData (same shape as registerNewRitual produces)
+      const ritualData = {
+        agentConfig: {
+          language,
+          phoneNumber: phone,
+          userInputs: geminiOut.userInputs,
+          voiceID,
+          userID,
+        },
+        fallbackSchedules: geminiOut.fallbackSchedules ?? [],
+        fallbackActive: false,
+        schedules, // regex-parsed from Call schedule subsection
+        timeZone,
+        userID,
+        // tracking-workflow uses googleDocId as a map key in
+        // user.ritualLabels (per-user.ts:142). For Tiptap-backed rituals
+        // we reuse the field with the ritualDocId — same identifier
+        // role, different upstream source. Avoids editing tracking-
+        // workflow at all. Also keep a distinct ritualDocId field for
+        // future "is this Tiptap-backed?" introspection.
+        googleDocId: ritualDocId,
+        googleDocsLink: '',
+        ritualDocId,
+        label: geminiOut.label ?? `${name}'s ritual`,
+        behaviorLabel: geminiOut.behaviorLabel ?? 'this',
+      };
+
+      // 8. Write rituals/{newRitualId}
+      const ritualRef = await db.collection('rituals').add(ritualData);
+
+      // 9. Upsert users/{userID}
+      await upsertUserDoc(ritualData, ritualRef.id);
+
+      // 10. Mark the ritualDoc sealed (samwise-app side will read this
+      //     to render the success screen)
+      await docRef.update({
+        sealedAt: FieldValue.serverTimestamp(),
+        sealedRitualId: ritualRef.id,
+      });
+
+      // 11. Compute firstCallAt
+      const firstCallAt = nextScheduledOccurrence(mergedSchedules, metadata.timeZone);
+
+      res.status(200).send({ ritualId: ritualRef.id, firstCallAt: firstCallAt.toISOString() });
+    });
+  });
+  ```
+- **Explanation:** mirrors `registerNewRitual` step-by-step. Critical: the synthesis prompt is REUSED (not forked) — per the synthesis-prompt skill, the prompt's three load-bearing parts (rules / template / worked example) MUST stay in sync, and forking it for Tiptap input would create exactly the drift the skill warns against. We just feed differently-sourced raw material to the same prompt.
+- **Open question for review:** the `googleDocId` field is mandated by the existing schema (and `registerNewRitual` uses it for the existing dedup mechanism). We're writing `''` for Tiptap-backed rituals + a new `ritualDocId` field. Need to verify the cron consumer (tracking-workflow) doesn't break on empty `googleDocId`. Quick grep of tracking-workflow before implementation.
+
+#### Step D.4 — register the new function
+
+- **In-file location:** `samwise-backend/cloud-functions/functions/src/index.ts`
+- **Should not be modified:** existing exports, especially `registerNewRitual`.
+- **Action:** add `export { registerRitualFromTiptap } from './registerRitualFromTiptap';` at the appropriate spot.
+
+### Phase E — Landing rewire
+
+#### Step E.1 — `app/page.tsx` — `handleStartClick` destination
+
+- **In-file location:** `samwise-landing/app/page.tsx`
+- **Should not be modified:**
+  - The gold-star overlay code (lines ~355–392 — `overlay.animate(...)`, the gradient, the blur)
+  - `setIsLeaving(true)`
+  - The reduced-motion early-return shape
+  - Anything visual on the page (per user direction "don't change the displayed front")
+  - `handleDiscoverClick` (the second hero CTA)
+  - `/qualify` route itself — kept alive for external/TikTok funnels
+- **Action:** modify ONLY the three places that contain a navigation destination string:
+  1. Line ~325 (reduced-motion early return): `router.push("/qualify")` → `window.location.href = startUrl()`
+  2. Line ~331 (no .nav-star fallback): same swap
+  3. Line ~388 (the timed navigation at t=525ms inside the overlay path): `router.push("/qualify")` → `window.location.href = startUrl()`
+- And modify the two `<a href="/qualify"` attributes (nav at line ~455, hero at line ~480):
+  - `<a href="/qualify"` → `<a href={startUrl()}`
+- Add a helper at module scope:
+  ```ts
+  // Cross-origin destination for the inverted onboarding flow. Reads
+  // NEXT_PUBLIC_SAMWISE_APP_URL (falls back to localhost in dev).
+  // `?from=transition` is the signal flag — the receiving app reads it
+  // and runs its own opacity fade-in to mask the cross-origin white
+  // flash (the gold-star transition's overlay is in this document and
+  // cannot survive cross-origin navigation).
+  const APP_URL = process.env.NEXT_PUBLIC_SAMWISE_APP_URL ?? 'http://localhost:3000';
+  const startUrl = () => `${APP_URL}/start?from=transition`;
+  ```
+- **CRITICAL:** for the `window.location.href` swap on the overlay path, keep the same `setTimeout(..., GLOW_DURATION_MS * 0.35)` timing so the navigation fires at the gold's peak — same UX as today. The only difference is `router.push` (SPA) → `window.location.href` (cross-origin) — the latter doesn't return a Promise but the visual sequencing is identical.
+- **Drop the sessionStorage flag** (lines ~341–346): it was for `/qualify`'s `useEffect` to read on mount. Cross-origin navigation makes sessionStorage unavailable to the receiving app. Replaced by the `?from=transition` URL param. Comment the lines with `// removed 2026-06-29 — cross-origin nav can't share sessionStorage; signal moved to URL param`.
+
+#### Step E.2 — Optimization: preconnect to app.samwise.life
+
+- **In-file location:** `samwise-landing/app/layout.tsx` (the root layout)
+- **Action:** add `<link rel="preconnect" href={APP_URL} />` and `<link rel="dns-prefetch" href={APP_URL} />` to the `<head>` so the cross-origin handshake is warm by the time the user clicks Start Now. Reduces the white flash by ~50-150ms on cold loads.
+
+### Testing phase
+
+#### Local test (samwise-app + samwise-landing)
+
+1. `cd samwise-app && pnpm dev` (port 3000); separate terminal `cd samwise-landing && pnpm dev` (port 3001).
+2. Set `NEXT_PUBLIC_SAMWISE_APP_URL=http://localhost:3000` in `samwise-landing/.env.local`.
+3. Visit `localhost:3001`. Click Start Now in nav OR in hero. Observe: gold-star animation fires; at t=525ms cross-origin nav to `localhost:3000/start?from=transition`.
+4. Assert: `/start` renders "Preparing your ritual…" briefly, then redirects to `/ritual-doc/<id>?mode=onboarding&from=transition`.
+5. Editor opens in onboarding mode: only Metadata · Ritual Call · Ritual visible in nav rail; step-progress strip shows "1 of 3 · Metadata"; Metadata tab is the form (not Tiptap).
+6. Fill Name, pick language en, gender male, fake phone, accept default timezone, behaviour_to_change, core_motivation, schedules.
+7. Switch to Ritual Call tab. Editor shows the 4 beats H2. Type a line under each.
+8. Switch to Ritual tab. Editor shows ONLY Mantras de desidentificación + Generación de bloqueador. Type under each. Seal button is visible at the bottom.
+9. Click Seal. POST hits cloud function. Success screen shows "Your first call is at <time>." Click "Open my ritual doc" → full editor with all 6 tabs visible.
+10. Open Firestore console (arbor-2026): assert `ritualDocs/<id>` has `sealedAt` set, `sealedRitualId` populated; `rituals/<newId>` has agentConfig + schedules + userInputs; `users/<workspaceToken>` has ritualLabels entry.
+11. Reset: in browser console `localStorage.removeItem('samwise.ritual.workspaceToken')` + reload `/start` → fresh ritualDoc minted.
+
+#### Integration test (cloud function locally)
+
+1. `cd samwise-backend/cloud-functions/functions && pnpm serve` (firebase emulator).
+2. Override `REGISTER_RITUAL_FROM_TIPTAP_URL` env in samwise-app to the emulator's URL.
+3. Walk through the seal flow above. Verify the synthesis prompt actually runs against Gemini (check function logs for `userInputs` length, schedules array, behaviorLabel).
+4. Read the resulting `rituals/{id}.agentConfig.userInputs` — it should be a filled `<user-inputs>` XML matching the existing format (per `ritual-synthesis-prompt` skill, audit against the 10-rules checklist).
+
+#### Update READMEs / context files
+
+- `samwise-app/context-for-code-agent.md`: add the new routes (`/start`, `/api/ritual-doc/create-for-workspace`, `/api/ritual-doc/[id]/seal`) + the new lib files; new Recent Changes entry dated 2026-06-29 describing inverted onboarding.
+- `samwise-backend/cloud-functions/functions/README.md` (if exists): document the new `registerRitualFromTiptap` function + its env vars + its parallel relationship to `registerNewRitual`.
+- `samwise-landing/context-for-code-agent.md`: note Start Now CTAs cross-origin to app.samwise.life/start as of 2026-06-29; sessionStorage flag retired in favor of `?from=transition` URL param.
+
+### After implementation
+
+- Update the three context files above.
+- Mark the task DONE in master Vibe doc (manual user step).
+- **Commit messages, one per repo:**
+  - `samwise-app`: `feat: inverted onboarding — /start route, onboarding-mode editor (3 tabs, form metadata, seal button, success screen)`
+  - `samwise-backend`: `feat: registerRitualFromTiptap cloud function — seals Tiptap-backed rituals via same synthesis prompt`
+  - `samwise-landing`: `chore: re-point Start Now CTAs to app.samwise.life/start (cross-origin, preserves gold-star transition)`
+
+## Decisions locked (was "Open questions" before 2026-06-29 review)
+
+- **No forms anywhere.** Every captured value is Tiptap text under a labeled H2 subsection. Samuel (or a future agent) verbally guides what to type where. ONE exception: a tiny inline Male | Female pill toggle above the Voice H2 in the Metadata tab.
+- **Hidden subsections / hidden tabs:** preserved in the saved Tiptap doc as empty scaffolding (per user: "keep them in the doc"). EditorPane split-and-merge mechanism (Step C.4) preserves hidden content across saves.
+- **Success screen copy:** "Your ritual is alive. / Your first call is at [time]. / Open it whenever you want to keep shaping."
+- **Firestore composite index** `(workspaceToken ASC, sealedAt ASC)`: accept and document. Add to `firestore.indexes.json`.
+- **Landing preconnect:** add 2 `<link>` tags (preconnect + dns-prefetch) to `samwise-landing/app/layout.tsx`. Non-visual, canonical edit accepted.
+- **Call schedule:** strict typed convention rather than free prose. The Call schedule subsection is seeded with placeholder paragraphs ("Morning — 06:30" / "Evening — 20:00") that the user OVERWRITES. The CF regex-parses 24h HH:MM with a strict pattern. No time pickers. (Per Step D.3 and `CALL_SCHEDULE_TEMPLATE` in schema.ts.)
+- **Samuel-notification on /start:** mirror /qualify's existing pattern. When `/api/ritual-doc/create-for-workspace` mints a NEW (not idempotent-returned) ritualDoc, fire a best-effort `notifySamuelOfOnboardingStart` via `samwise-app/lib/notify/samuel.ts` (adds a new method alongside `notifySamuelOfQualifyStart` / `notifySamuelOfBooking`). Writes to `mail/` collection; uses Firebase Trigger Email extension as today. Best-effort: never blocks the route.
+- **Returning user (token has prior sealed doc) clicks Start Now:** mint a NEW unsealed ritualDoc. `createRitualDocForWorkspace`'s idempotency is per-(token, UNSEALED-only) — sealed docs do NOT block a fresh start. Existing sealed rituals remain accessible at their direct `/ritual-doc/[id]` URL (the user keeps that link or re-discovers via their workspace token's user doc).
+
+## Pre-implementation verification (I'll do these before writing code)
+
+- **Grep tracking-workflow** for `googleDocId` to confirm it doesn't break when empty. If it does, add a thin coalesce (`googleDocId || ritualDocId`) in the cron's resolver rather than special-casing in the new CF.
+- **Confirm `firestore.indexes.json`** location in the arbor-2026 project (or the equivalent for our deploy pipeline). Add the composite index there.
+- **Confirm `NEXT_PUBLIC_SAMWISE_APP_URL`** is set on samwise-landing's Vercel project (it should be — used by /qualify's `/api/notify/qualify-start` proxy per memory `reference_landing_no_firestore_admin_notify`).
+- **Confirm the synthesis prompt's Rule 10** accepts schedules from prose text like "Morning: 6:30am". The skill's worked example uses similar language so this should work, but worth a one-shot Gemini test before committing to the design.
