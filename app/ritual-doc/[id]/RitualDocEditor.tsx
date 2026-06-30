@@ -26,6 +26,28 @@ import { VoicePillToggle } from './VoicePillToggle';
 import { OnboardingSealButton } from './OnboardingSealButton';
 import { OnboardingSuccessScreen } from './OnboardingSuccessScreen';
 import { GoldArrivalOverlay } from './GoldArrivalOverlay';
+import { RitualDocAgent } from './RitualDocAgent';
+import {
+  useRitualDocAgent,
+  TAB_HAS_AGENT,
+  type DataChannelEvent,
+} from './useRitualDocAgent';
+import {
+  writeUnderH2,
+  appendStructured,
+  replaceAll,
+  editEntryByHeading,
+} from './tiptap-delta-apply';
+
+// Beginning tab: which H2 holds each qualification variable. The
+// qualification agent's setVariables tool fires DataChannel events
+// like { type: 'qualification:variable_update', name: 'core_motivation',
+// value: '…' }; the router below looks up the H2 here and writes the
+// value into the paragraph immediately after that H2.
+const BEGINNING_H2_FOR_VARIABLE: Record<string, string> = {
+  behaviour_to_change: "Behaviour I'd like to change",
+  core_motivation: 'Core motivation',
+};
 
 type SerializedDoc = {
   id: string;
@@ -124,6 +146,94 @@ export function RitualDocEditor({
   const [editorForActive, setEditorForActive] = useState<Editor | null>(null);
   useEffect(() => setEditorForActive(null), [active]);
 
+  // Latest registered editor instance, keyed by tab. The DataChannel
+  // router reads this when an event arrives so it can target the right
+  // editor even if the active tab has just changed. EditorPane calls
+  // onEditorReady when it mounts the Tiptap instance for that tab.
+  const editorsByTabRef = useRef<Partial<Record<TabKey, Editor>>>({});
+
+  const onDataChannelEvent = useCallback((ev: DataChannelEvent) => {
+    if (ev.type === 'qualification:variable_update' && ev.name) {
+      const h2 = BEGINNING_H2_FOR_VARIABLE[ev.name];
+      if (!h2) return;
+      const editor = editorsByTabRef.current.beginning;
+      writeUnderH2(editor ?? null, h2, String(ev.value ?? ''));
+      return;
+    }
+    if (ev.type === 'ritual-doc:tiptap_update' && ev.tab && ev.mode) {
+      const editor = editorsByTabRef.current[ev.tab as TabKey] ?? null;
+      const text = ev.text ?? '';
+      if (ev.mode === 'append') appendStructured(editor, text);
+      else if (ev.mode === 'replace') replaceAll(editor, text);
+      else if (ev.mode === 'edit' && ev.heading) {
+        editEntryByHeading(editor, ev.heading, text);
+      }
+    }
+  }, []);
+
+  const agent = useRitualDocAgent({ docId: id, onDataChannelEvent });
+
+  // EditorPane calls this when it mounts/remounts its Tiptap instance.
+  // We thread it back into BOTH `editorForActive` (so VoicePillToggle
+  // works) and `editorsByTabRef` (so the agent's delta router can find
+  // the editor for any tab that's currently mounted).
+  const handleEditorReady = useCallback(
+    (editor: Editor | null) => {
+      setEditorForActive(editor);
+      if (editor) editorsByTabRef.current[active] = editor;
+      else delete editorsByTabRef.current[active];
+    },
+    [active],
+  );
+
+  // Auto-dispatch once on first onboarding arrival to the Beginning tab.
+  // localStorage flag prevents re-dispatch on reload / re-mount. If the
+  // dispatch fails, the user can click "Talk to your guide" to retry.
+  useEffect(() => {
+    if (!onboarding) return;
+    if (active !== 'beginning') return;
+    if (agent.phase !== 'idle') return;
+    const key = `ritual-doc:agent-greeted:${id}`;
+    try {
+      if (window.localStorage.getItem(key)) return;
+      window.localStorage.setItem(key, '1');
+    } catch {
+      /* private mode — degrade to always-auto */
+    }
+    void agent.dispatch('beginning');
+    // Only react to mode/id/active; agent.phase/dispatch are stable
+    // enough that re-running on them would risk a double-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboarding, active, id]);
+
+  // Tab-change handoff orchestration. When the active tab changes while
+  // an agent is connected:
+  //   - target tab has an agent  → publishHandoff(target) → worker shuts
+  //     down → our Disconnected listener flips phase to 'idle' →
+  //     the second effect below catches that and dispatches the new tab
+  //   - target tab is agent-less → publishHandoff(null) → farewell +
+  //     shutdown → stay 'idle' (no re-dispatch)
+  const prevTabRef = useRef(active);
+  const pendingHandoffTabRef = useRef<TabKey | null>(null);
+  useEffect(() => {
+    if (prevTabRef.current === active) return;
+    prevTabRef.current = active;
+    if (agent.phase !== 'active') return;
+    const next = TAB_HAS_AGENT[active] ? active : null;
+    pendingHandoffTabRef.current = next;
+    void agent.publishHandoff(next);
+  }, [active, agent]);
+
+  // Re-dispatch leg: when a handoff settles back to 'idle', if we have
+  // a pending target tab, fire dispatch on it.
+  useEffect(() => {
+    if (agent.phase !== 'idle') return;
+    const pending = pendingHandoffTabRef.current;
+    if (!pending) return;
+    pendingHandoffTabRef.current = null;
+    void agent.dispatch(pending);
+  }, [agent.phase, agent]);
+
   useEffect(() => {
     const onChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -214,7 +324,7 @@ export function RitualDocEditor({
               tab={active}
               initialContent={initial.tabs[active].tiptap}
               visibleH2s={visibleH2sForActive}
-              onEditorReady={setEditorForActive}
+              onEditorReady={handleEditorReady}
             />
             {onboarding && active === 'ritual' ? (
               <OnboardingSealButton docId={id} />
@@ -244,10 +354,27 @@ export function RitualDocEditor({
           onChange={setActive}
           wordmarkHref="/"
           footerSlot={
-            <ImmerseToggle isFullscreen={isFullscreen} onToggle={() => void toggleFullscreen()} />
+            <div className="flex flex-col gap-3">
+              <RitualDocAgent
+                phase={agent.phase}
+                activeTab={active}
+                errorMsg={agent.errorMsg}
+                micHot={agent.micHot}
+                onDispatch={(t) => void agent.dispatch(t)}
+                onEnd={agent.end}
+                onPttDown={agent.pttDown}
+                onPttUp={agent.pttUp}
+              />
+              <ImmerseToggle isFullscreen={isFullscreen} onToggle={() => void toggleFullscreen()} />
+            </div>
           }
         />
       </div>
+
+      {/* Hidden audio sink — LiveKit appends <audio> elements here so
+          the agent's voice plays through the user's speakers. Mounted
+          at the root so it survives tab switches inside the editor. */}
+      <div ref={agent.audioContainerRef} className="sr-only" aria-hidden />
     </div>
   );
 }
