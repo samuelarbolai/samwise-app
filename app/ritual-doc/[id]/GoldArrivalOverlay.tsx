@@ -2,60 +2,114 @@
 
 import { useEffect, useState } from 'react';
 
-// Destination-side replay of samwise-landing's gold-star transition.
-// The landing's overlay is in samwise.life's document and is destroyed
-// at cross-origin nav (~t=525ms, gold at peak). Without this component
-// the user would see: gold expand on landing → abrupt white during
-// cross-origin nav → editor fade-in. That gold→white cut is the
-// "glitchy glow" the user reported. This component picks up where
-// landing left off:
+// Destination-side gold glow, anchored at the sidebar's collapsed
+// FourPointStar position. The star sits at `left-4 top-1/2` with
+// `p-2` padding and a 20px star inside — so its visual centre is at
+// roughly (16 + 8 + 10) = 34px from the viewport left, vertically
+// centred. We use that as BOTH the radial-gradient origin AND the
+// scale transform-origin — the glow visibly emerges from the star,
+// blooms to cover the viewport, then contracts back into it.
 //
-//   mode='hold'  — mount at peak gold, hold (no animation). Used by
-//                  /start during the bootstrap window so the user
-//                  keeps seeing gold while the workspace is created.
-//   mode='fade'  — mount at peak gold, fade scale 1.4 → 0.05 +
-//                  opacity 1 → 0 over 700ms. Used by /ritual-doc/[id]
-//                  in sync with the editor's own 700ms fade-in beneath.
-//                  Removes itself on completion.
+// Phases:
+//   'fade-in'  — opacity 0 → 1, scale 0.05 → 1.4 (350ms ease-out)
+//   'peak'     — hold at 1 / 1.4 (200ms) — gives the eye a moment to
+//                read the gold before contraction
+//   'fade-out' — opacity 1 → 0, scale 1.4 → 0.05 (350ms ease-in)
+//   'done'     — return null
 //
-// Same radial-gradient + blur values as the landing's overlay (verbatim
-// from samwise-landing/app/page.tsx:357). Inline styles only — Turbopack
-// silently drops CSS rules added to globals.css in this codebase
-// (documented elsewhere in context-for-code-agent.md).
-const PEAK_BG =
-  'radial-gradient(circle at center, #D4A85A 0%, rgba(212, 168, 90, 0.85) 14%, rgba(212, 168, 90, 0.55) 32%, rgba(212, 168, 90, 0.25) 55%, rgba(212, 168, 90, 0) 80%)';
-const FADE_MS = 700;
+// Two modes:
+//   'fade' — runs the full cycle then self-removes. Used by
+//            /ritual-doc/[id] on arrival.
+//   'hold' — fades in to peak, then HOLDS forever (no fade-out). Was
+//            used by /start; currently no surface uses it but kept
+//            for future bootstrap-window callers.
+const STAR_X_PX = 34;
+const STAR_Y_VH = 50;
+const GRADIENT = `radial-gradient(circle at ${STAR_X_PX}px ${STAR_Y_VH}vh, #D4A85A 0%, rgba(212, 168, 90, 0.85) 14%, rgba(212, 168, 90, 0.55) 32%, rgba(212, 168, 90, 0.25) 55%, rgba(212, 168, 90, 0) 80%)`;
+const TRANSFORM_ORIGIN = `${STAR_X_PX}px ${STAR_Y_VH}vh`;
+
+const FADE_IN_MS = 350;
+const PEAK_HOLD_MS = 200;
+const FADE_OUT_MS = 350;
+
+type Phase = 'init' | 'fade-in' | 'peak' | 'fade-out' | 'done';
 
 export function GoldArrivalOverlay({ mode }: { mode: 'hold' | 'fade' }) {
-  // For 'fade' mode: mount at peak, then on next frame transition to
-  // scale 0.05 / opacity 0 over 700ms. After the animation completes,
-  // self-removes so it stops eating clicks (though pointer-events:none
-  // means it doesn't eat clicks anyway — removing keeps the DOM clean).
-  const [phase, setPhase] = useState<'peak' | 'fading' | 'done'>(
-    mode === 'fade' ? 'peak' : 'peak',
-  );
+  const [phase, setPhase] = useState<Phase>('init');
 
   useEffect(() => {
-    if (mode !== 'fade') return;
-    // Two RAFs: first commits the peak frame, second triggers the
-    // transition to the end frame. Without the second RAF the browser
-    // may collapse both states into one paint and skip the animation.
+    // Two RAFs guarantee the browser commits the initial `init` paint
+    // (opacity 0, scale 0.05) BEFORE we trigger the fade-in transition.
+    // Without this, both states collapse into one paint and the
+    // animation is skipped.
     let raf1 = 0;
     let raf2 = 0;
+    const timers: number[] = [];
+
     raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => setPhase('fading'));
+      raf2 = requestAnimationFrame(() => {
+        setPhase('fade-in');
+        timers.push(
+          window.setTimeout(() => setPhase('peak'), FADE_IN_MS),
+        );
+        if (mode === 'fade') {
+          timers.push(
+            window.setTimeout(
+              () => setPhase('fade-out'),
+              FADE_IN_MS + PEAK_HOLD_MS,
+            ),
+          );
+          timers.push(
+            window.setTimeout(
+              () => setPhase('done'),
+              FADE_IN_MS + PEAK_HOLD_MS + FADE_OUT_MS + 100,
+            ),
+          );
+        }
+      });
     });
-    const t = window.setTimeout(() => setPhase('done'), FADE_MS + 100);
+
     return () => {
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
-      window.clearTimeout(t);
+      for (const t of timers) window.clearTimeout(t);
     };
   }, [mode]);
 
   if (phase === 'done') return null;
 
-  const isFading = mode === 'fade' && phase === 'fading';
+  // Compute opacity + transform per phase. `init` is the pre-fade-in
+  // resting state (invisible, tiny scale at the star). `fade-in` and
+  // `fade-out` are mid-transition states; CSS transitions handle the
+  // interpolation.
+  let opacity = 0;
+  let scale = 0.05;
+  let transitionDur = 0;
+  let easing = 'ease-out';
+  switch (phase) {
+    case 'init':
+      opacity = 0;
+      scale = 0.05;
+      transitionDur = 0;
+      break;
+    case 'fade-in':
+      opacity = 1;
+      scale = 1.4;
+      transitionDur = FADE_IN_MS;
+      easing = 'ease-out';
+      break;
+    case 'peak':
+      opacity = 1;
+      scale = 1.4;
+      transitionDur = 0;
+      break;
+    case 'fade-out':
+      opacity = 0;
+      scale = 0.05;
+      transitionDur = FADE_OUT_MS;
+      easing = 'ease-in';
+      break;
+  }
 
   return (
     <div
@@ -65,15 +119,16 @@ export function GoldArrivalOverlay({ mode }: { mode: 'hold' | 'fade' }) {
         inset: 0,
         pointerEvents: 'none',
         zIndex: 9999,
-        background: PEAK_BG,
+        background: GRADIENT,
         filter: 'blur(80px)',
         willChange: 'transform, opacity',
-        opacity: isFading ? 0 : 1,
-        transform: isFading ? 'scale(0.05)' : 'scale(1.4)',
-        transformOrigin: 'center center',
-        transition: isFading
-          ? `transform ${FADE_MS}ms ease-in-out, opacity ${FADE_MS}ms ease-in-out`
-          : 'none',
+        opacity,
+        transform: `scale(${scale})`,
+        transformOrigin: TRANSFORM_ORIGIN,
+        transition:
+          transitionDur > 0
+            ? `transform ${transitionDur}ms ${easing}, opacity ${transitionDur}ms ${easing}`
+            : 'none',
       }}
     />
   );

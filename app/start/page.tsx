@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { readOrMintWorkspaceToken, RITUAL_WORKSPACE_KEY } from '@/lib/workspace-token';
-import { GoldArrivalOverlay } from '@/app/ritual-doc/[id]/GoldArrivalOverlay';
 
 // Bootstrap route — destination of landing's Start Now CTA. Mints (or
 // reads) a workspace token, ensures a ritualDoc exists for it, then
@@ -90,7 +89,13 @@ function StartInner() {
       ) : (
         <p className="text-sm text-muted-foreground">Preparing your ritual…</p>
       )}
-      {fromTransition && !error ? <GoldArrivalOverlay mode="hold" /> : null}
+      {/* /start used to render <GoldArrivalOverlay mode="hold" /> here,
+          but per user direction 2026-06-29 the destination glow lives
+          only on /ritual-doc/[id] (a single coherent gesture from-and-
+          back-to the sidebar's gold star). /start stays invisible
+          during bootstrap so the gap between landing's contracting
+          glow and the editor's fading-in glow reads as a single
+          transition rather than two separate gold moments. */}
     </div>
   );
 }
