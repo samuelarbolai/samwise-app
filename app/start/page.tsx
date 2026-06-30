@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { readOrMintWorkspaceToken, RITUAL_WORKSPACE_KEY } from '@/lib/workspace-token';
+import { GoldArrivalOverlay } from '@/app/ritual-doc/[id]/GoldArrivalOverlay';
 
 // Bootstrap route — destination of landing's Start Now CTA. Mints (or
 // reads) a workspace token, ensures a ritualDoc exists for it, then
@@ -22,11 +23,13 @@ export default function StartPage() {
   );
 }
 
+// Empty white shell — NO text. The Suspense fallback renders during
+// hydration BEFORE StartInner reads ?from=transition, so any visible
+// content would flash briefly even when arriving via the gold-star
+// transition. Empty fallback = invisible during hydration window.
 function Loading() {
   return (
-    <div className="brand-editorial flex min-h-screen items-center justify-center bg-background text-foreground">
-      <p className="text-sm text-muted-foreground">Preparing your ritual…</p>
-    </div>
+    <div className="brand-editorial min-h-screen bg-background" />
   );
 }
 
@@ -64,10 +67,11 @@ function StartInner() {
   }, [router, fromTransition]);
 
   // When arriving via the gold-star transition, /start renders fully
-  // invisible (opacity 0 over white) so the cross-origin white flash
-  // blends seamlessly into the editor's own fade-in. The bootstrap
-  // text would otherwise flicker briefly mid-transition. Errors still
-  // become visible (we WANT the user to see them).
+  // invisible (opacity 0 over white) so the bootstrap text doesn't
+  // flicker. A gold overlay HELD at peak sits on top during the
+  // bootstrap window so the cross-origin gap reads as continuation
+  // of the landing's gold rather than a white flash. Errors break out
+  // of the invisibility so the user can see what went wrong.
   const hideForTransition = fromTransition && !error;
 
   return (
@@ -86,6 +90,7 @@ function StartInner() {
       ) : (
         <p className="text-sm text-muted-foreground">Preparing your ritual…</p>
       )}
+      {fromTransition && !error ? <GoldArrivalOverlay mode="hold" /> : null}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import { ImmerseToggle } from './ImmerseToggle';
 import { VoicePillToggle } from './VoicePillToggle';
 import { OnboardingSealButton } from './OnboardingSealButton';
 import { OnboardingSuccessScreen } from './OnboardingSuccessScreen';
+import { GoldArrivalOverlay } from './GoldArrivalOverlay';
 
 type SerializedDoc = {
   id: string;
@@ -179,6 +180,15 @@ export function RitualDocEditor({
         transition: `opacity ${ARRIVAL_FADE_MS}ms ease-out`,
       }}
     >
+      {/* When arriving from the landing's gold-star transition, render
+          a destination-side gold overlay that mounts at PEAK and
+          fades to nothing over 700ms — picks up where the landing's
+          overlay (destroyed by cross-origin nav) left off, bridges
+          the gap, then reveals the editor beneath. Eliminates the
+          gold→white→content "glitch" the user saw on the first pass.
+          NOT gated on `arrived` (which flips in ~32ms) — the overlay
+          self-removes via its own phase state machine at 700ms+100. */}
+      {fromTransition ? <GoldArrivalOverlay mode="fade" /> : null}
       <div style={{ opacity: visible, transition: `opacity ${FADE_MS}ms ease-out` }}>
         <main className="min-h-screen py-12 pl-24 pr-10">
           <div key={active} className="beat-in mx-auto max-w-3xl">
