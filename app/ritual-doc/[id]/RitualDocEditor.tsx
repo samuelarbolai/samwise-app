@@ -55,7 +55,14 @@ const ONBOARDING_NAV: readonly SidebarNavItem<TabKey>[] = ONBOARDING_TAB_KEYS.ma
 }));
 
 const FADE_MS = 300;
-const ARRIVAL_FADE_MS = 400;
+// Arrival fade — mirrors samwise-landing /qualify's 700ms ease-out
+// register. Long enough that the eye reads it as a deliberate scene
+// transition rather than a UI fade. Paired with the 2-RAF + failsafe
+// pattern below for a stable, paint-aware reveal.
+const ARRIVAL_FADE_MS = 700;
+// Hard cap so the editor is never stuck invisible if the paint signal
+// never lands (matches /qualify's 4s failsafe).
+const ARRIVAL_FAILSAFE_MS = 4000;
 
 export function RitualDocEditor({
   id,
@@ -82,14 +89,33 @@ export function RitualDocEditor({
   const [visible, setVisible] = useState(1);
   const clickInFlightRef = useRef(false);
 
-  // Cross-origin arrival fade — masks the cold load between landing's
-  // gold-star peak and app.samwise.life mount.
+  // Cross-origin arrival fade — bridges landing's gold-star transition
+  // to the editor's first paint. Mirrors samwise-landing /qualify's
+  // receiver pattern: start invisible, wait for actual paint readiness
+  // (NOT just mount), then trigger a 700ms ease-out fade-in.
+  //
+  // The trigger uses TWO requestAnimationFrames instead of setTimeout:
+  // first RAF guarantees React's render has committed to the DOM, the
+  // second guarantees the browser has painted once. Only then do we
+  // flip `arrived` true — so the fade always reveals real content,
+  // never a mid-render flicker.
+  //
+  // 4-second failsafe (matches /qualify) so the editor is never stuck
+  // invisible if something blocks the paint signal.
   const [arrived, setArrived] = useState(!fromTransition);
   useEffect(() => {
-    if (fromTransition && !arrived) {
-      const t = setTimeout(() => setArrived(true), 16);
-      return () => clearTimeout(t);
-    }
+    if (!fromTransition || arrived) return;
+    let raf1 = 0;
+    let raf2 = 0;
+    const failsafe = window.setTimeout(() => setArrived(true), ARRIVAL_FAILSAFE_MS);
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setArrived(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(failsafe);
+    };
   }, [fromTransition, arrived]);
 
   // Editor instance ref so the Voice pill toggle can write into the

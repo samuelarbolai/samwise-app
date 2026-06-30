@@ -63,8 +63,21 @@ function StartInner() {
     })();
   }, [router, fromTransition]);
 
+  // When arriving via the gold-star transition, /start renders fully
+  // invisible (opacity 0 over white) so the cross-origin white flash
+  // blends seamlessly into the editor's own fade-in. The bootstrap
+  // text would otherwise flicker briefly mid-transition. Errors still
+  // become visible (we WANT the user to see them).
+  const hideForTransition = fromTransition && !error;
+
   return (
-    <div className="brand-editorial flex min-h-screen items-center justify-center bg-background text-foreground">
+    <div
+      className="brand-editorial flex min-h-screen items-center justify-center bg-background text-foreground"
+      style={{
+        opacity: hideForTransition ? 0 : 1,
+        transition: 'opacity 700ms ease-out',
+      }}
+    >
       {error ? (
         <div className="max-w-md text-center">
           <p className="mb-2 text-sm text-destructive">Could not start your ritual.</p>
