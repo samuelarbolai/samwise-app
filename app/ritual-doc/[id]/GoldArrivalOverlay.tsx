@@ -120,8 +120,15 @@ export function GoldArrivalOverlay({ mode }: { mode: 'hold' | 'fade' }) {
         pointerEvents: 'none',
         zIndex: 9999,
         background: GRADIENT,
-        filter: 'blur(80px)',
-        willChange: 'transform, opacity',
+        // 40px instead of 80px — Chrome's Skia backend re-blurs the
+        // full-viewport gradient every frame during the scale animation,
+        // which was visibly laggy on memory-pressured Chrome. Halving
+        // the blur radius is the cheapest possible win without changing
+        // the visual; the gradient already has 5 soft stops doing the
+        // heavy lifting on edge softness. Safari (Metal/Core Image)
+        // handled 80px fine but matching for consistency.
+        filter: 'blur(40px)',
+        willChange: 'transform, opacity, filter',
         opacity,
         transform: `scale(${scale})`,
         transformOrigin: TRANSFORM_ORIGIN,
