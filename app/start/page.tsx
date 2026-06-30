@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { readOrMintWorkspaceToken, RITUAL_WORKSPACE_KEY } from '@/lib/workspace-token';
 
@@ -9,7 +9,28 @@ import { readOrMintWorkspaceToken, RITUAL_WORKSPACE_KEY } from '@/lib/workspace-
 // replaces the URL with the editor's onboarding mode.
 // `?from=transition` is passed through so the editor's first paint
 // fades in (masks the cross-origin white flash from samwise.life).
+//
+// Wrapped in <Suspense> because useSearchParams() bails out static
+// generation otherwise (Next.js 16 hard error during the prerender
+// pass). The page has no SEO / static-render benefit — it's pure
+// client bootstrap → redirect.
 export default function StartPage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <StartInner />
+    </Suspense>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="brand-editorial flex min-h-screen items-center justify-center bg-background text-foreground">
+      <p className="text-sm text-muted-foreground">Preparing your ritual…</p>
+    </div>
+  );
+}
+
+function StartInner() {
   const router = useRouter();
   const params = useSearchParams();
   const fromTransition = params.get('from') === 'transition';
