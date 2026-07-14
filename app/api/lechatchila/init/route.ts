@@ -13,7 +13,7 @@ const RequestSchema = z.object({
   googleDocLink: z.string().min(1),
 });
 
-const SUPPORTED_LANGUAGES = ['en', 'es'] as const;
+const SUPPORTED_LANGUAGES = ['en', 'es', 'he'] as const;
 type Language = (typeof SUPPORTED_LANGUAGES)[number];
 
 function parseDocId(link: string): string | null {
