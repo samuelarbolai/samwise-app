@@ -184,7 +184,7 @@ export type Gender = 'male' | 'female';
 // samwise-backend/ritual-agent/src/config/voiceIds.ts. Hand-synced —
 // when voiceIds.ts changes, mirror here AND in the cloud function
 // (registerRitualFromTiptap).
-export const VOICE_ID_BY_LANG_GENDER: Record<'en' | 'es', Record<Gender, string>> = {
+export const VOICE_ID_BY_LANG_GENDER: Record<'en' | 'es' | 'he', Record<Gender, string>> = {
   en: {
     male:   '5ee9feff-1265-424a-9d7f-8e4d431a12c7',
     female: '03496517-369a-4db1-8236-3d3ae459ddf7',
@@ -192,6 +192,10 @@ export const VOICE_ID_BY_LANG_GENDER: Record<'en' | 'es', Record<Gender, string>
   es: {
     male:   '13ff5deb-2591-42ad-a356-63a04e524411',
     female: 'f4d6bb07-f876-4464-ba70-cd48d8701890',
+  },
+  he: {
+    male:   '921f4026-af53-4761-ac56-1c32e44856e8',
+    female: 'd0be495c-5e23-4b88-b12d-bc42d38be9a5',
   },
 };
 
